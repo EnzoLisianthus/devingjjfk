@@ -132,8 +132,21 @@ mod_assign_get_assignments
 MIT License
 
 
-## v4.3 debug fix
-- Debug ID: `0000000000` or `debug`
-- Debug PW: `normal`, `massive`, `deadline`, `changes`, `slow`, `flaky`, `empty`, `malformed`, `apierror`, `loginfail`, `help`
-- HTML이 포함된 Moodle 로그인 오류는 안전한 평문으로 변환해 표시합니다.
-- app/style은 network-first로 갱신하여 오래된 Service Worker 캐시 문제를 줄였습니다.
+## v4.4 debug keyword login
+
+디버그 모드는 비밀번호가 아니라 학번(ID) 칸의 예약어로 선택합니다.
+
+- `normal` / PW 빈칸: 기본 데이터
+- `massive` / PW 빈칸: 대량 과제
+- `deadline` / PW 빈칸: 마감 경계값
+- `changes` / PW 빈칸: polling마다 추가/삭제/마감 변경
+- `slow` / PW 빈칸: 느린 서버
+- `flaky` / PW 빈칸: 주기적 네트워크 실패
+- `empty` / PW 빈칸: 빈 목록
+- `malformed` / PW 빈칸: 일부 손상 데이터
+- `apierror` / PW 빈칸: Moodle API 오류
+- `loginfail` / PW 빈칸: 로그인 오류 UI 테스트
+- `help` / PW 빈칸: 예약어 목록 표시
+- `debug`는 `normal`의 별칭입니다.
+
+안전을 위해 예약어가 ID에 들어오면 비밀번호 자동완성 여부와 관계없이 Moodle 서버로 절대 전송하지 않습니다. 실제 Moodle 로그인은 숫자 학번 + 비밀번호 방식 그대로입니다.

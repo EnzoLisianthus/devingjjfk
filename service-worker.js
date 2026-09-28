@@ -1,18 +1,18 @@
 // =========================================================
-// JJFK PWA Service Worker v4.3
+// JJFK PWA Service Worker v4.4
 // - Moodle/cross-origin 요청은 절대 가로채거나 캐시하지 않음
-// - HTML/JS/CSS는 network-first: 새 배포를 우선 확인
-// - 아이콘/manifest는 cache-first
+// - HTML/JS/CSS는 network-first: 배포 직후 새 코드를 우선 확인
+// - manifest/icons는 cache-first
 // - 오프라인에서는 마지막 정상 앱 셸로 fallback
 // =========================================================
 
-const CACHE_NAME = "jjfk-cache-v4.3-liquid-debug";
+const CACHE_NAME = "jjfk-cache-v4.4-liquid-debug-keyword";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=4.3",
-  "./app.js?v=4.3",
+  "./style.css?v=4.4",
+  "./app.js?v=4.4",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -46,7 +46,7 @@ self.addEventListener("fetch", event => {
 
   const url = new URL(request.url);
 
-  // Moodle token/API를 포함한 외부 요청은 브라우저 네트워크 스택에 그대로 맡깁니다.
+  // Moodle token/API 등 외부 요청은 브라우저 네트워크 스택에 그대로 맡깁니다.
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === "navigate") {
@@ -69,7 +69,6 @@ self.addEventListener("fetch", event => {
 });
 
 async function fetchFresh(request) {
-  // 설치형 PWA에서도 HTTP cache가 오래된 JS/CSS를 다시 주는 상황을 줄입니다.
   return fetch(request, { cache: "no-store" });
 }
 

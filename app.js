@@ -1,12 +1,12 @@
 // =========================================================
-// JJFK Assignment Hub v4.3 DEBUG
+// JJFK Assignment Hub v4.4 DEBUG KEYWORD
 // - Liquid Glass UI 유지
 // - 화면 남은 시간 갱신과 Moodle 네트워크 갱신 완전 분리
 // - iOS/PWA 타이머 정지·백그라운드 복귀 대응
 // - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4.3-liquid-debug";
+const APP_VERSION = "4.4-liquid-debug-keyword";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 
@@ -24,13 +24,12 @@ const FETCH_TIMEOUT_MS = 15_000;
 // =========================
 // BUILT-IN DEBUG BACKEND
 // =========================
-// 실제 Moodle 계정과 충돌하기 어려운 테스트 전용 ID입니다.
-// 이 계정은 외부 서버에 전송되지 않으며, 아래 DebugBackend에서만 처리됩니다.
+// 예약된 디버그 단어를 학번 칸에 입력하면 디버그 백엔드로 진입합니다.
+// 예: ID=normal, PW=빈칸. 예약어는 실제 Moodle 서버로 절대 전송되지 않습니다.
+// iOS Password AutoFill이 PW를 채우더라도 예약어가 우선 처리되도록 PW 값은 무시합니다.
 const DEBUG_BACKEND_ENABLED = true;
-const DEBUG_USERNAME = "0000000000";
-const DEBUG_USERNAME_ALIAS = "debug";
 const DEBUG_TOKEN_PREFIX = "JJFK_DEBUG::";
-const DEBUG_SESSION_KEY = "jjfk-debug-session-v1";
+const DEBUG_SESSION_KEY = "jjfk-debug-session-v2";
 
 // 디버그 모드에서는 서버 polling을 빠르게 관찰할 수 있도록 주기를 단축합니다.
 // 실제 Moodle 로그인에서는 NETWORK_REFRESH_INTERVAL_MS(60초)가 그대로 사용됩니다.
@@ -126,17 +125,28 @@ const DebugBackend = {
     "apierror"
   ]),
 
-  isDebugUsername(username) {
-    if (!DEBUG_BACKEND_ENABLED) return false;
-
-    // 모바일 자동완성/복붙에서 앞뒤 공백이나 일반 공백이 섞여도
-    // 디버그 계정을 실제 Moodle 서버로 보내지 않도록 먼저 정규화합니다.
-    const value = String(username ?? "")
-      .replace(/\s+/g, "")
+  normalizeKeyword(username) {
+    return String(username ?? "")
+      .normalize("NFKC")
       .trim()
       .toLowerCase();
+  },
 
-    return value === DEBUG_USERNAME || value === DEBUG_USERNAME_ALIAS;
+  debugCommandFromUsername(username) {
+    if (!DEBUG_BACKEND_ENABLED) return null;
+
+    const value = this.normalizeKeyword(username);
+
+    // debug는 normal의 짧은 별칭으로 남겨 둡니다.
+    if (value === "debug") return "normal";
+    if (value === "help" || value === "loginfail") return value;
+    if (this.scenarios.includes(value)) return value;
+
+    return null;
+  },
+
+  isDebugUsername(username) {
+    return this.debugCommandFromUsername(username) !== null;
   },
 
   isDebugToken(token) {
@@ -203,26 +213,27 @@ const DebugBackend = {
   },
 
   async login(username, password) {
-    if (!this.isDebugUsername(username)) return null;
+    const command = this.debugCommandFromUsername(username);
+    if (!command) return null;
 
-    const scenario = String(password ?? "").trim().toLowerCase();
+    // 디버그 예약어는 PW보다 먼저 판정합니다.
+    // 사용법은 PW를 비워 두는 것이지만, iOS 자동완성으로 값이 남아 있어도
+    // 예약어를 실제 Moodle 서버에 보내지 않기 위해 PW 내용 자체는 무시합니다.
+    void password;
 
-    if (scenario === "help") {
-      throw new Error(`DEBUG PW: ${this.scenarios.join(", ")}`);
+    if (command === "help") {
+      throw new Error(
+        `DEBUG ID: ${this.scenarios.join(", ")}, loginfail, help`
+      );
     }
 
     // 로그인 오류 UI 자체를 확인하기 위한 예약 시나리오입니다.
-    if (scenario === "loginfail") {
+    if (command === "loginfail") {
       await this.delay(900);
       throw new Error("DEBUG: 로그인 실패 응답을 에뮬레이션했습니다.");
     }
 
-    if (!this.scenarios.includes(scenario)) {
-      throw new Error(
-        `DEBUG 비밀번호(시나리오)가 올바르지 않습니다. ` +
-        `PW를 help로 입력하면 목록을 확인할 수 있습니다.`
-      );
-    }
+    const scenario = command;
 
     await this.delay(180);
 
@@ -597,13 +608,12 @@ function escapeHTML(value) {
 }
 
 // Moodle은 일부 오류 메시지에 <br>, <span> 같은 HTML 조각을 담아 반환합니다.
-// 에러 영역에는 HTML을 실행하지 않고 사람이 읽을 수 있는 평문만 표시합니다.
+// 오류 영역에서는 HTML을 실행하지 않고 읽을 수 있는 평문으로 변환합니다.
 function serverMessageToText(value) {
   if (value === null || value === undefined) return "";
 
   let source = String(value);
 
-  // DOMParser의 textContent는 <br>을 줄바꿈으로 보존하지 않으므로 먼저 치환합니다.
   source = source
     .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<\/p\s*>/gi, "\n")
@@ -613,7 +623,6 @@ function serverMessageToText(value) {
     const doc = new DOMParser().parseFromString(source, "text/html");
     source = doc.body?.textContent ?? source;
   } catch {
-    // DOMParser가 없는 특수 환경에서는 최소한의 태그 제거만 수행합니다.
     source = source.replace(/<[^>]*>/g, "");
   }
 
@@ -679,16 +688,23 @@ const Auth = {
     const cleanUsername = String(username ?? "").trim();
     const cleanPassword = String(password ?? "");
 
-    if (!cleanUsername || !cleanPassword) {
-      throw new Error("학번과 비밀번호를 모두 입력해 주세요.");
+    if (!cleanUsername) {
+      throw new Error("학번을 입력해 주세요.");
     }
 
+    // 중요: 빈 PW 검사보다 디버그 예약어 판정을 먼저 합니다.
+    // ID=normal / PW=빈칸 같은 디버그 로그인이 여기서 확정됩니다.
     const debugLogin = await DebugBackend.login(cleanUsername, cleanPassword);
 
     if (debugLogin?.token) {
       Store.set("token", debugLogin.token);
       State.token = debugLogin.token;
       return debugLogin.token;
+    }
+
+    // 실제 Moodle 로그인에만 비밀번호를 요구합니다.
+    if (!cleanPassword) {
+      throw new Error("비밀번호를 입력해 주세요.");
     }
 
     const url =
@@ -1082,8 +1098,7 @@ const UI = {
   },
 
   setAuthError(message) {
-    if (!this.authError) return;
-    this.authError.textContent = serverMessageToText(message);
+    if (this.authError) this.authError.textContent = message ?? "";
   },
 
   toast(message, duration = 2800) {
@@ -1114,7 +1129,7 @@ const PWA = {
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
-          "./service-worker.js?v=4.3",
+          "./service-worker.js?v=4.4",
           {
             scope: "./",
             updateViaCache: "none"
@@ -1354,9 +1369,6 @@ const App = {
 // BOOT
 // =========================
 window.addEventListener("DOMContentLoaded", () => {
-  console.info(`[JJFK] ${APP_VERSION}`);
-  document.documentElement.dataset.jjfkBuild = APP_VERSION;
-
   App.init().catch(error => {
     console.error("[Boot]", error);
 
