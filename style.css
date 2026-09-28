@@ -1,5 +1,5 @@
 /* =========================================================
-   JJFK Liquid Glass UI v4
+   JJFK Liquid Glass UI v4.4-muted
    - iOS standalone PWA 우선
    - 상단 시스템 영역은 웹 blur로 덮지 않음
    - backdrop-filter는 로그인 패널/과목 surface처럼 큰 계층에만 적용
@@ -11,13 +11,13 @@
 :root {
   color-scheme: dark;
 
-  --bg: #080b12;
-  --bg-deep: #05070c;
+  --bg: #0b0c10;
+  --bg-deep: #07080b;
 
   --text: rgba(255, 255, 255, 0.94);
-  --text-soft: rgba(247, 249, 255, 0.76);
-  --muted: rgba(235, 240, 255, 0.56);
-  --faint: rgba(235, 240, 255, 0.38);
+  --text-soft: rgba(248, 248, 250, 0.76);
+  --muted: rgba(235, 235, 240, 0.56);
+  --faint: rgba(235, 235, 240, 0.38);
 
   --blue: #5e8cff;
   --green: #30d158;
@@ -32,7 +32,7 @@
   --glass-border: rgba(255, 255, 255, 0.155);
   --glass-highlight: rgba(255, 255, 255, 0.24);
   --glass-blur: 22px;
-  --glass-saturate: 165%;
+  --glass-saturate: 125%;
 
   --separator: rgba(255, 255, 255, 0.085);
 
@@ -106,7 +106,7 @@ button {
   isolation: isolate;
 
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.22) 0%, transparent 38%),
+    linear-gradient(180deg, rgba(25, 26, 32, 0.18) 0%, transparent 38%),
     var(--bg);
 }
 
@@ -119,9 +119,9 @@ button {
   pointer-events: none;
 
   background:
-    radial-gradient(circle at 13% 2%, rgba(70, 112, 255, 0.28), transparent 30%),
-    radial-gradient(circle at 96% 31%, rgba(133, 79, 255, 0.19), transparent 36%),
-    radial-gradient(circle at 45% 105%, rgba(36, 182, 193, 0.12), transparent 39%);
+    radial-gradient(circle at 13% 2%, rgba(118, 126, 150, 0.13), transparent 30%),
+    radial-gradient(circle at 96% 31%, rgba(128, 119, 142, 0.095), transparent 36%),
+    radial-gradient(circle at 45% 105%, rgba(102, 129, 130, 0.065), transparent 39%);
 
   transform: translateZ(0);
 }
@@ -134,7 +134,7 @@ button {
   pointer-events: none;
 
   background:
-    linear-gradient(180deg, rgba(4, 7, 13, 0.02), rgba(4, 7, 13, 0.16));
+    linear-gradient(180deg, rgba(7, 8, 11, 0.02), rgba(7, 8, 11, 0.18));
 }
 
 /* =========================
@@ -371,7 +371,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.105);
   border-radius: 15px;
 
-  background: rgba(5, 8, 14, 0.28);
+  background: rgba(8, 9, 12, 0.30);
   color: var(--text);
 
   outline: none;
@@ -387,12 +387,12 @@ button {
 }
 
 .auth-card input::placeholder {
-  color: rgba(235, 240, 255, 0.28);
+  color: rgba(235, 235, 240, 0.28);
 }
 
 .auth-card input:focus {
   border-color: rgba(104, 142, 255, 0.68);
-  background: rgba(7, 11, 20, 0.36);
+  background: rgba(10, 11, 15, 0.38);
 
   box-shadow:
     0 0 0 3px rgba(79, 124, 255, 0.14),
@@ -488,8 +488,8 @@ button {
   background:
     linear-gradient(
       180deg,
-      rgba(8, 11, 18, 0.16) 0%,
-      rgba(8, 11, 18, 0.04) 72%,
+      rgba(11, 12, 17, 0.16) 0%,
+      rgba(11, 12, 17, 0.04) 72%,
       transparent 100%
     );
 }
@@ -774,7 +774,7 @@ button {
   padding: 12px 14px;
   border-radius: 16px;
 
-  background: rgba(26, 31, 43, 0.92);
+  background: rgba(24, 25, 30, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.10);
 
   -webkit-backdrop-filter: blur(16px) saturate(150%);
@@ -805,7 +805,7 @@ button {
 ========================= */
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .liquid-glass {
-    background: rgba(30, 36, 50, 0.96);
+    background: rgba(31, 32, 38, 0.96);
   }
 }
 
@@ -814,7 +814,7 @@ button {
   .toast {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    background: rgba(27, 33, 46, 0.96);
+    background: rgba(28, 29, 35, 0.96);
   }
 }
 
