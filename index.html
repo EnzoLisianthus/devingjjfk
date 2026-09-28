@@ -2,17 +2,14 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <!-- =========================
-       MOBILE OPTIMIZATION (핵심)
-  ========================== -->
-  <meta name="viewport"
-        content="width=device-width,
-                 initial-scale=1,
-                 maximum-scale=1,
-                 user-scalable=no,
-                 viewport-fit=cover">
 
-  <meta name="theme-color" content="#0b0f1a" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  />
+
+  <meta name="theme-color" content="#080b12" />
+  <meta name="color-scheme" content="dark" />
 
   <!-- iOS PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,105 +18,106 @@
 
   <!-- PWA -->
   <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
 
   <title>Assignment Hub</title>
 
-  <link rel="stylesheet" href="style.css" />
+  <!-- 버전 쿼리는 설치된 PWA가 새 CSS를 확실히 다시 받도록 유지 -->
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 
 <body>
+  <div id="app">
 
-<!-- =========================
-     APP ROOT
-========================== -->
-<div id="app">
+    <!-- =========================
+         LOADING
+    ========================== -->
+    <section id="loading-layer" class="layer active" aria-live="polite">
+      <div class="loading-panel liquid-glass liquid-glass-strong">
+        <div class="spinner" aria-hidden="true"></div>
+        <div id="loading-text" class="loading-text">과제 정보를 불러오는 중</div>
+      </div>
+    </section>
 
-  <!-- =========================
-       LOADING
-  ========================== -->
-  <section id="loading-layer" class="layer active">
-    <div class="center">
-      <div class="spinner"></div>
-      <div class="text">Loading</div>
-    </div>
-  </section>
+    <!-- =========================
+         LOGIN
+    ========================== -->
+    <section id="login-layer" class="layer">
+      <div class="auth-container">
+        <div class="auth-card liquid-glass liquid-glass-strong">
+          <div class="auth-header">
+            <div class="auth-eyebrow">JJFK</div>
+            <div class="auth-title">로그인</div>
+            <div class="auth-subtitle">전주대학교 Cyber Campus</div>
+          </div>
 
-  <!-- =========================
-       LOGIN
-  ========================== -->
-  <section id="login-layer" class="layer">
+          <form id="login-form" class="auth-form" novalidate>
+            <label class="field">
+              <span class="field-label">학번</span>
+              <input
+                id="login-id"
+                name="username"
+                type="text"
+                inputmode="numeric"
+                autocomplete="username"
+                placeholder="학번"
+                enterkeyhint="next"
+                required
+              />
+            </label>
 
-    <div class="auth-container">
+            <label class="field">
+              <span class="field-label">비밀번호</span>
+              <input
+                id="login-pw"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="비밀번호"
+                enterkeyhint="go"
+                required
+              />
+            </label>
 
-      <div class="auth-card">
+            <div id="auth-error" class="auth-error" role="alert" aria-live="assertive"></div>
 
-        <div class="auth-header">
-          <div class="auth-title">Welcome</div>
-          <div class="auth-subtitle">Assignment Hub</div>
+            <button id="login-btn" class="primary-btn" type="submit">
+              로그인
+            </button>
+          </form>
+
+          <div class="auth-hint">계정 정보는 토큰 발급에만 사용됩니다.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================
+         DASHBOARD
+    ========================== -->
+    <section id="dashboard-layer" class="layer">
+      <header class="top-bar">
+        <div class="top-left">
+          <div class="app-title">전주대 과제확인</div>
+          <div class="app-subtitle">만든놈:daxun</div>
         </div>
 
-        <div class="auth-form">
-          <input id="login-id" type="text" placeholder="Student ID" />
-          <input id="login-pw" type="password" placeholder="Password" />
-        </div>
+        <button id="logout-btn" class="ghost-btn" type="button" aria-label="로그아웃">
+          로그아웃
+        </button>
+      </header>
 
-        <button id="login-btn" class="primary-btn">Login</button>
+      <main id="app-view" class="content" aria-live="polite">
+        <div class="empty-state">과제 정보를 불러오는 중입니다.</div>
+      </main>
+    </section>
 
-        <div class="auth-hint">
-          Cyber Campus System
-        </div>
+    <!-- =========================
+         OPTIONAL UI LAYERS
+    ========================== -->
+    <div id="modal-layer" class="overlay" aria-hidden="true"></div>
+    <div id="toast-layer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  </div>
 
-      </div>
-
-    </div>
-
-  </section>
-
-  <!-- =========================
-       DASHBOARD
-  ========================== -->
-  <section id="dashboard-layer" class="layer">
-
-    <!-- TOP BAR -->
-    <header class="top-bar">
-      <div class="top-left">
-        <div class="app-title">전주대 과제확인</div>
-        <div class="app-subtitle">만든놈:daxun</div>
-      </div>
-
-      <button id="logout-btn" class="ghost-btn"></button>
-    </header>
-
-    <!-- MAIN CONTENT -->
-    <main id="app-view" class="content">
-
-      <div class="empty-state">
-        Loading assignments...
-      </div>
-
-    </main>
-
-  </section>
-
-  <!-- =========================
-       MODAL SYSTEM
-  ========================== -->
-  <div id="modal-layer" class="overlay"></div>
-
-  <!-- =========================
-       TOAST SYSTEM
-  ========================== -->
-  <div id="toast-layer" class="toast-container"></div>
-
-  <!-- =========================
-       SAFE AREA FIX (iOS notch)
-  ========================== -->
-  <div class="safe-area-bottom"></div>
-
-</div>
-
-<!-- SCRIPT -->
-<script src="app.js?v=2" defer></script>
-
+  <script src="app.js?v=4" defer></script>
 </body>
 </html>

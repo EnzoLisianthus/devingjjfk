@@ -1,23 +1,22 @@
 {
   "name": "JJFK 전주대 과제확인",
   "short_name": "전주대 과제확인",
-  "description": "과제 마감 관리 및 알림 PWA 시스템",
-
+  "description": "전주대학교 Cyber Campus 과제를 빠르게 확인하는 Liquid Glass PWA",
   "start_url": "./index.html",
   "scope": "./",
-
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone"],
-
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
-
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
+  "background_color": "#080b12",
+  "theme_color": "#080b12",
   "orientation": "portrait-primary",
-
   "lang": "ko-KR",
-
-  "categories": ["productivity", "education"],
-
+  "categories": [
+    "productivity",
+    "education"
+  ],
   "icons": [
     {
       "src": "icons/icon-192.png",
@@ -38,7 +37,6 @@
       "purpose": "maskable"
     }
   ],
-
   "shortcuts": [
     {
       "name": "과제 목록",
@@ -53,6 +51,5 @@
       "description": "마감이 가까운 과제"
     }
   ],
-
   "prefer_related_applications": false
 }

@@ -1,221 +1,117 @@
-// ===============================
-// JJFK PWA Service Worker (FINAL)
-// ===============================
+// =========================================================
+// JJFK PWA Service Worker v4
+// - 알림 기능 제거: 캐싱/오프라인 셸만 담당
+// - cross-origin Moodle API 요청은 절대 캐시하지 않음
+// - 새 버전 설치 시 즉시 활성화
+// =========================================================
 
-const CACHE_NAME = "jjfk-cache-v2";
-const NOTI_KEY = "notified-tasks";
+const CACHE_NAME = "jjfk-cache-v4-liquid";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
-  "./app.js",
-  "./style.css",
+  "./style.css?v=4",
+  "./app.js?v=4",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png"
 ];
 
-// ===============================
+// =========================
 // INSTALL
-// ===============================
-self.addEventListener("install", (event) => {
+// =========================
+self.addEventListener("install", event => {
   self.skipWaiting();
 
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
   );
 });
 
-// ===============================
+// =========================
 // ACTIVATE
-// ===============================
-self.addEventListener("activate", (event) => {
+// =========================
+self.addEventListener("activate", event => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) return caches.delete(key);
-        })
-      )
-    )
-  );
+    (async () => {
+      const keys = await caches.keys();
 
-  self.clients.claim();
+      await Promise.all(
+        keys
+          .filter(key => key.startsWith("jjfk-cache-") && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      );
+
+      await self.clients.claim();
+    })()
+  );
 });
 
-// ===============================
+// =========================
 // FETCH
-// ===============================
-self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  const url = new URL(req.url);
+// =========================
+self.addEventListener("fetch", event => {
+  const request = event.request;
 
-  if (url.pathname.includes("/api/")) {
-    event.respondWith(networkFirst(req));
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+
+  // 중요: cyber.jj.ac.kr의 토큰/API 응답 및 다른 외부 요청은
+  // 서비스워커에서 캐시하거나 가로채지 않습니다.
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirstNavigation(request));
     return;
   }
 
-  event.respondWith(cacheFirst(req));
+  event.respondWith(cacheFirstStatic(request));
 });
 
-// ===============================
-// CACHE STRATEGIES
-// ===============================
-async function cacheFirst(req) {
-  const cached = await caches.match(req);
+// =========================
+// STRATEGIES
+// =========================
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request);
+
+    if (response && response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put("./index.html", response.clone());
+    }
+
+    return response;
+  } catch {
+    return (
+      (await caches.match("./index.html")) ||
+      (await caches.match("./")) ||
+      new Response("Offline", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      })
+    );
+  }
+}
+
+async function cacheFirstStatic(request) {
+  const cached = await caches.match(request);
   if (cached) return cached;
 
-  const res = await fetch(req);
-  const cache = await caches.open(CACHE_NAME);
-  cache.put(req, res.clone());
-
-  return res;
-}
-
-async function networkFirst(req) {
   try {
-    const res = await fetch(req);
-    const cache = await caches.open(CACHE_NAME);
-    cache.put(req, res.clone());
-    return res;
+    const response = await fetch(request);
+
+    if (response && response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+    }
+
+    return response;
   } catch {
-    const cached = await caches.match(req);
-    return cached || new Response("offline", { status: 503 });
+    return new Response("Offline", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" }
+    });
   }
 }
-
-// ===============================
-// MESSAGE
-// ===============================
-self.addEventListener("message", async (event) => {
-  const data = event.data;
-  if (!data || !data.type) return;
-
-  switch (data.type) {
-    case "SAVE_TASKS":
-      await saveToCache("tasks", data.payload);
-      break;
-
-    case "GET_TASKS":
-      const tasks = await getFromCache("tasks");
-      event.ports[0]?.postMessage(tasks || []);
-      break;
-
-    case "CHECK_DEADLINES":
-      await checkDeadlines(data.payload);
-      break;
-  }
-});
-
-// ===============================
-// CACHE HELPERS
-// ===============================
-async function saveToCache(key, data) {
-  const cache = await caches.open(CACHE_NAME);
-  await cache.put(`data-${key}`, new Response(JSON.stringify(data)));
-}
-
-async function getFromCache(key) {
-  const cache = await caches.open(CACHE_NAME);
-  const res = await cache.match(`data-${key}`);
-  return res ? await res.json() : null;
-}
-
-// ===============================
-// 🔥 NOTIFICATION STATE STORAGE
-// ===============================
-async function getNotiState() {
-  const cache = await caches.open(CACHE_NAME);
-  const res = await cache.match(NOTI_KEY);
-  return res ? await res.json() : {};
-}
-
-async function setNotiState(data) {
-  const cache = await caches.open(CACHE_NAME);
-  await cache.put(NOTI_KEY, new Response(JSON.stringify(data)));
-}
-
-// ===============================
-// 🔥 NOTIFICATION SYSTEM (FINAL)
-// ===============================
-async function checkDeadlines(tasks) {
-  if (!tasks || !Array.isArray(tasks)) return;
-
-  const now = Date.now();
-  const notiState = await getNotiState();
-
-  for (const task of tasks) {
-    if (!task.deadline || !task.id) continue;
-
-    const deadline = new Date(task.deadline).getTime();
-    const diff = deadline - now;
-
-    if (!notiState[task.id]) {
-      notiState[task.id] = {
-        before4h: false,
-        deadline: false,
-        expiredAt: null
-      };
-    }
-
-    const state = notiState[task.id];
-
-    // =========================
-    // ⏰ 4시간 전 (1회)
-    // =========================
-    if (
-      diff > 0 &&
-      diff <= 4 * 60 * 60 * 1000 &&
-      !state.before4h
-    ) {
-      self.registration.showNotification("⏰ 마감 4시간 전", {
-        body: task.title || "과제 마감 4시간 전입니다.",
-        icon: "./icons/icon-192.png",
-        badge: "./icons/icon-192.png"
-      });
-
-      state.before4h = true;
-    }
-
-    // =========================
-    // 🚨 마감 (1회)
-    // =========================
-    if (diff <= 0 && !state.deadline) {
-      self.registration.showNotification("🚨 마감 완료", {
-        body: task.title || "과제가 마감되었습니다.",
-        icon: "./icons/icon-192.png",
-        badge: "./icons/icon-192.png"
-      });
-
-      state.deadline = true;
-      state.expiredAt = now;
-    }
-
-    // =========================
-    // 🧹 24시간 후 삭제
-    // =========================
-    if (
-      state.expiredAt &&
-      now - state.expiredAt > 24 * 60 * 60 * 1000
-    ) {
-      delete notiState[task.id];
-    }
-  }
-
-  await setNotiState(notiState);
-}
-
-// ===============================
-// PUSH (확장)
-// ===============================
-self.addEventListener("push", (event) => {
-  const data = event.data ? event.data.json() : {};
-
-  self.registration.showNotification(data.title || "알림", {
-    body: data.body || "",
-    icon: "./icons/icon-192.png"
-  });
-});

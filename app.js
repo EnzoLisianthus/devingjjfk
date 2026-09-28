@@ -1,12 +1,19 @@
-// =========================
-// CONFIG
-// =========================
-window.addEventListener("DOMContentLoaded", () => {
-  App.init();
-});
+// =========================================================
+// JJFK Assignment Hub v4
+// - 기존 Moodle API/토큰 구조 유지
+// - Liquid Glass UI용 DOM 렌더링
+// - 네트워크/중복 로드/서비스워커 업데이트 안정성 보강
+// =========================================================
 
+const APP_VERSION = "4-liquid";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
+const REFRESH_INTERVAL_MS = 60_000;
+const FETCH_TIMEOUT_MS = 15_000;
+
+// 현재 프로젝트의 기존 필터 정책을 유지합니다.
+const MAX_FUTURE_DAYS = 16;
+const MAX_PAST_MS = 86_400_000;
 
 // =========================
 // STATE
@@ -14,7 +21,9 @@ const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 const State = {
   token: null,
   data: [],
-  interval: null
+  interval: null,
+  loading: false,
+  initialized: false
 };
 
 // =========================
@@ -22,24 +31,93 @@ const State = {
 // =========================
 const Store = {
   get(key) {
-    return JSON.parse(localStorage.getItem(key));
+    try {
+      const value = localStorage.getItem(key);
+      return value === null ? null : JSON.parse(value);
+    } catch (error) {
+      console.warn(`[Store] ${key} 값을 읽지 못했습니다.`, error);
+      return null;
+    }
   },
+
   set(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.warn(`[Store] ${key} 값을 저장하지 못했습니다.`, error);
+      return false;
+    }
   },
+
   remove(key) {
-    localStorage.removeItem(key);
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.warn(`[Store] ${key} 값을 삭제하지 못했습니다.`, error);
+    }
   }
 };
 
 // =========================
-// ENV CHECK (🔥 추가 핵심)
+// ENV / HELPERS
 // =========================
 function isStandalone() {
   return (
     window.navigator.standalone === true ||
     window.matchMedia("(display-mode: standalone)").matches
   );
+}
+
+function escapeHTML(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatDeadline(timestamp) {
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) return "마감 일시 확인 불가";
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}.${month}.${day} ${hour}:${minute}`;
+}
+
+async function fetchJSON(url, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const text = await response.text();
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("서버 응답이 올바른 JSON 형식이 아닙니다.");
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // =========================
@@ -51,27 +129,42 @@ const Auth = {
   },
 
   async login(username, password) {
-    const url = `${TOKEN_URL}?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&service=moodle_mobile_app`;
+    const cleanUsername = String(username ?? "").trim();
+    const cleanPassword = String(password ?? "");
 
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.token) {
-      Store.set("token", data.token);
-      State.token = data.token;
-      return data.token;
+    if (!cleanUsername || !cleanPassword) {
+      throw new Error("학번과 비밀번호를 모두 입력해 주세요.");
     }
 
-    throw new Error("로그인 실패");
+    const url =
+      `${TOKEN_URL}?username=${encodeURIComponent(cleanUsername)}` +
+      `&password=${encodeURIComponent(cleanPassword)}` +
+      `&service=moodle_mobile_app`;
+
+    const data = await fetchJSON(url);
+
+    if (!data?.token) {
+      const message = data?.error || data?.errorcode || "로그인에 실패했습니다.";
+      throw new Error(String(message));
+    }
+
+    Store.set("token", data.token);
+    State.token = data.token;
+
+    return data.token;
   },
 
   logout() {
     Store.remove("token");
     State.token = null;
+    State.data = [];
 
-    if (State.interval) clearInterval(State.interval);
+    if (State.interval) {
+      clearInterval(State.interval);
+      State.interval = null;
+    }
 
-    App.showLogin();
+    UI.renderLogin();
   }
 };
 
@@ -80,9 +173,12 @@ const Auth = {
 // =========================
 const API = {
   async fetchAssignments(token) {
-    const url = `${BASE_URL}?moodlewsrestformat=json&wsfunction=mod_assign_get_assignments&wstoken=${token}`;
-    const res = await fetch(url);
-    return await res.json();
+    const url =
+      `${BASE_URL}?moodlewsrestformat=json` +
+      `&wsfunction=mod_assign_get_assignments` +
+      `&wstoken=${encodeURIComponent(token)}`;
+
+    return await fetchJSON(url);
   }
 };
 
@@ -91,18 +187,28 @@ const API = {
 // =========================
 const Data = {
   normalize(raw) {
+    if (!Array.isArray(raw?.courses)) return [];
+
     const result = [];
 
     raw.courses.forEach(course => {
-      if (!course.assignments?.length) return;
+      if (!Array.isArray(course?.assignments) || course.assignments.length === 0) {
+        return;
+      }
+
+      const assignments = course.assignments
+        .map(a => ({
+          id: a?.id,
+          title: String(a?.name ?? "제목 없는 과제"),
+          deadline: Number(a?.duedate) * 1000
+        }))
+        .filter(a => Number.isFinite(a.deadline) && a.deadline > 0);
+
+      if (assignments.length === 0) return;
 
       result.push({
-        courseName: course.fullname,
-        assignments: course.assignments.map(a => ({
-          id: a.id,
-          title: a.name,
-          deadline: a.duedate * 1000
-        }))
+        courseName: String(course?.fullname ?? "과목명 없음"),
+        assignments
       });
     });
 
@@ -110,10 +216,21 @@ const Data = {
   },
 
   sort(data) {
-    data.forEach(c => {
-      c.assignments.sort((a, b) => a.deadline - b.deadline);
+    const sorted = data.map(course => ({
+      ...course,
+      assignments: [...course.assignments].sort(
+        (a, b) => a.deadline - b.deadline
+      )
+    }));
+
+    // 과목 그룹 역시 가장 가까운 과제 마감일 순으로 배치합니다.
+    sorted.sort((a, b) => {
+      const aFirst = a.assignments[0]?.deadline ?? Infinity;
+      const bFirst = b.assignments[0]?.deadline ?? Infinity;
+      return aFirst - bFirst;
     });
-    return data;
+
+    return sorted;
   }
 };
 
@@ -123,32 +240,31 @@ const Data = {
 const Filter = {
   apply(data) {
     const now = Date.now();
+    const maxFutureMs = MAX_FUTURE_DAYS * 86_400_000;
 
     return data
       .map(course => {
         const assignments = course.assignments.filter(a => {
           const diff = a.deadline - now;
-          const days = diff / 86400000;
 
-          if (days > 16) return false;
-          if (diff < -86400000) return false;
+          if (diff > maxFutureMs) return false;
+          if (diff < -MAX_PAST_MS) return false;
 
           return true;
         });
 
         return { ...course, assignments };
       })
-      .filter(c => c.assignments.length > 0);
+      .filter(course => course.assignments.length > 0);
   }
 };
 
 // =========================
-// LOGIC
+// STATUS LOGIC
 // =========================
 const Logic = {
   calcStatus(deadline) {
-    const now = Date.now();
-    const diff = deadline - now;
+    const diff = deadline - Date.now();
 
     if (diff < 0) {
       return {
@@ -158,22 +274,22 @@ const Logic = {
     }
 
     return {
-      color: diff < 3 * 86400000 ? "orange" : "green",
+      color: diff < 3 * 86_400_000 ? "orange" : "green",
       text: this.formatRemain(diff)
     };
   },
 
   formatRemain(ms) {
-    const d = Math.floor(ms / 86400000);
-    const h = Math.floor((ms % 86400000) / 3600000);
-    const m = Math.floor((ms % 3600000) / 60000);
+    const d = Math.floor(ms / 86_400_000);
+    const h = Math.floor((ms % 86_400_000) / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
 
     return `${d}일 ${h}시간 ${m}분 남음`;
   },
 
   formatPassed(ms) {
-    const h = Math.floor(ms / 3600000);
-    const m = Math.floor((ms % 3600000) / 60000);
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
 
     return `마감 ${h}시간 ${m}분 경과`;
   }
@@ -183,131 +299,218 @@ const Logic = {
 // UI
 // =========================
 const UI = {
-  loginLayer: document.getElementById("login-layer"),
-  dashboardLayer: document.getElementById("dashboard-layer"),
+  loadingLayer: null,
+  loginLayer: null,
+  dashboardLayer: null,
+  appView: null,
+  loadingText: null,
+  loginForm: null,
+  loginId: null,
+  loginPw: null,
+  loginButton: null,
+  authError: null,
+  logoutButton: null,
+  toastLayer: null,
+
+  initRefs() {
+    this.loadingLayer = document.getElementById("loading-layer");
+    this.loginLayer = document.getElementById("login-layer");
+    this.dashboardLayer = document.getElementById("dashboard-layer");
+    this.appView = document.getElementById("app-view");
+    this.loadingText = document.getElementById("loading-text");
+    this.loginForm = document.getElementById("login-form");
+    this.loginId = document.getElementById("login-id");
+    this.loginPw = document.getElementById("login-pw");
+    this.loginButton = document.getElementById("login-btn");
+    this.authError = document.getElementById("auth-error");
+    this.logoutButton = document.getElementById("logout-btn");
+    this.toastLayer = document.getElementById("toast-layer");
+  },
+
+  bindEvents() {
+    this.loginForm?.addEventListener("submit", async event => {
+      event.preventDefault();
+
+      if (State.loading) return;
+
+      const username = this.loginId?.value ?? "";
+      const password = this.loginPw?.value ?? "";
+
+      this.setAuthError("");
+      this.setLoginBusy(true);
+
+      try {
+        await Auth.login(username, password);
+
+        if (this.loginPw) this.loginPw.value = "";
+
+        await App.load({ showLoading: true });
+        App.startAutoRefresh();
+      } catch (error) {
+        const message =
+          error?.name === "AbortError"
+            ? "로그인 요청 시간이 초과되었습니다. 네트워크를 확인해 주세요."
+            : error?.message || "로그인에 실패했습니다.";
+
+        this.setAuthError(message);
+      } finally {
+        this.setLoginBusy(false);
+      }
+    });
+
+    this.logoutButton?.addEventListener("click", () => {
+      Auth.logout();
+    });
+  },
 
   show(layer) {
-    document.querySelectorAll(".layer").forEach(l => {
-      l.classList.remove("active");
+    if (!layer) return;
+
+    document.querySelectorAll(".layer").forEach(item => {
+      item.classList.remove("active");
+      item.setAttribute("aria-hidden", "true");
     });
 
     layer.classList.add("active");
+    layer.setAttribute("aria-hidden", "false");
   },
 
-  // =========================
-  // 🔥 브라우저 모드 화면 추가
-  // =========================
-  renderBrowserMode() {
-    const app = document.getElementById("app");
-
-    app.innerHTML = `
-      <div style="
-        height:100vh;
-        display:flex;
-        flex-direction:column;
-        justify-content:center;
-        align-items:center;
-        text-align:center;
-        padding:20px;
-        font-family:sans-serif;
-      ">
-        <h2>Cyber Campus App</h2>
-        <p>이 앱은 홈 화면에 추가해서 사용해야 합니다.</p>
-        <p style="margin-top:10px;">
-          Safari에서 열기 → 공유 → “홈 화면에 추가”
-        </p>
-      </div>
-    `;
+  renderLoading(message = "과제 정보를 불러오는 중") {
+    if (this.loadingText) this.loadingText.textContent = message;
+    this.show(this.loadingLayer);
   },
 
   renderLogin() {
+    this.setAuthError("");
+    this.setLoginBusy(false);
     this.show(this.loginLayer);
 
-    this.loginLayer.innerHTML = `
-      <div class="auth-container">
-        <div class="auth-card">
-          <div class="title">로그인</div>
+    requestAnimationFrame(() => {
+      this.loginId?.focus({ preventScroll: true });
+    });
+  },
 
-          <input id="id" placeholder="학번" />
-          <input id="pw" type="password" placeholder="비밀번호" />
+  renderBrowserMode() {
+    const app = document.getElementById("app");
+    if (!app) return;
 
-          <button id="loginBtn">로그인</button>
+    app.innerHTML = `
+      <div class="browser-mode">
+        <div class="browser-mode-card liquid-glass liquid-glass-strong">
+          <h1 class="browser-mode-title">Assignment Hub</h1>
+          <p>이 앱은 홈 화면에 추가한 뒤 사용하는 Standalone PWA입니다.</p>
+          <p>Safari에서 공유 버튼 → <strong>홈 화면에 추가</strong>를 선택해 주세요.</p>
         </div>
       </div>
     `;
-
-    document.getElementById("loginBtn").onclick = async () => {
-      const id = document.getElementById("id").value;
-      const pw = document.getElementById("pw").value;
-
-      try {
-        await Auth.login(id, pw);
-        App.init();
-      } catch {
-        alert("로그인 실패");
-      }
-    };
   },
 
   renderDashboard(data) {
-    const view = document.getElementById("app-view");
-    if (!view) return;
+    if (!this.appView) return;
 
     this.show(this.dashboardLayer);
 
-    let html = "";
-
-    data.forEach(course => {
-      html += `
-        <div class="course-block">
-          <div class="course-title">${course.courseName}</div>
+    if (!Array.isArray(data) || data.length === 0) {
+      this.appView.innerHTML = `
+        <div class="empty-state">
+          현재 표시할 과제가 없습니다.
+        </div>
       `;
+      return;
+    }
 
-      course.assignments.forEach(a => {
-        const s = Logic.calcStatus(a.deadline);
+    const html = data.map(course => {
+      const assignments = course.assignments.map(assignment => {
+        const status = Logic.calcStatus(assignment.deadline);
 
-        html += `
-          <div class="assignment-card">
-            <div class="title">${a.title}</div>
-            <div class="deadline">${new Date(a.deadline).toLocaleString()}</div>
-            <div class="status ${s.color}">${s.text}</div>
-          </div>
+        return `
+          <article class="assignment-row">
+            <div class="assignment-main">
+              <div class="assignment-title">${escapeHTML(assignment.title)}</div>
+              <div class="assignment-deadline">마감 ${formatDeadline(assignment.deadline)}</div>
+            </div>
+            <div class="status ${status.color}">${escapeHTML(status.text)}</div>
+          </article>
         `;
-      });
+      }).join("");
 
-      html += `</div>`;
-    });
+      return `
+        <section class="course-block">
+          <div class="course-heading">
+            <div class="course-title">${escapeHTML(course.courseName)}</div>
+            <div class="course-count">${course.assignments.length}개</div>
+          </div>
+          <div class="course-surface liquid-glass">
+            ${assignments}
+          </div>
+        </section>
+      `;
+    }).join("");
 
-    view.innerHTML = html;
+    this.appView.innerHTML = html;
+  },
+
+  setLoginBusy(busy) {
+    if (!this.loginButton) return;
+
+    this.loginButton.disabled = busy;
+    this.loginButton.textContent = busy ? "로그인 중…" : "로그인";
+  },
+
+  setAuthError(message) {
+    if (this.authError) this.authError.textContent = message ?? "";
+  },
+
+  toast(message, duration = 2800) {
+    if (!this.toastLayer || !message) return;
+
+    this.toastLayer.innerHTML = "";
+
+    const element = document.createElement("div");
+    element.className = "toast";
+    element.textContent = message;
+
+    this.toastLayer.appendChild(element);
+
+    window.setTimeout(() => {
+      if (element.isConnected) element.remove();
+    }, duration);
   }
 };
 
 // =========================
-// NOTIFY
+// PWA SERVICE WORKER
 // =========================
-const Notify = {
-  async request() {
-    if (Notification.permission !== "granted") {
-      await Notification.requestPermission();
-    }
-  },
+const PWA = {
+  register() {
+    if (!("serviceWorker" in navigator)) return;
+    if (location.protocol !== "https:" && location.hostname !== "localhost") return;
 
-  check(data) {
-    data.forEach(c => {
-      c.assignments.forEach(a => {
-        const diff = a.deadline - Date.now();
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    const reloadKey = `jjfk-sw-reloaded-${APP_VERSION}`;
 
-        if (diff > 0 && diff < 3600000) {
-          this.send(`⏰ 1시간 남음: ${a.title}`);
+    window.addEventListener("load", async () => {
+      try {
+        const registration = await navigator.serviceWorker.register(
+          "./service-worker.js",
+          { scope: "./" }
+        );
+
+        // GitHub Pages/PWA에서 장시간 열린 경우에도 새 SW를 확인합니다.
+        registration.update().catch(() => {});
+
+        if (hadController) {
+          navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (sessionStorage.getItem(reloadKey)) return;
+
+            sessionStorage.setItem(reloadKey, "1");
+            window.location.reload();
+          });
         }
-      });
-    });
-  },
-
-  send(msg) {
-    if (Notification.permission === "granted") {
-      new Notification(msg);
-    }
+      } catch (error) {
+        console.warn("[PWA] Service Worker 등록 실패", error);
+      }
+    }, { once: true });
   }
 };
 
@@ -316,55 +519,127 @@ const Notify = {
 // =========================
 const App = {
   async init() {
-    // 🔥 핵심: 웹앱 아닌 경우 차단 화면
+    if (State.initialized) return;
+    State.initialized = true;
+
+    UI.initRefs();
+    UI.bindEvents();
+    PWA.register();
+
     if (!isStandalone()) {
       UI.renderBrowserMode();
       return;
     }
 
-    const token = Auth.getToken();
-    State.token = token;
+    State.token = Auth.getToken();
 
-    if (!token) {
+    if (!State.token) {
       UI.renderLogin();
       return;
     }
 
-    await this.load();
-    this.startAutoRefresh();
+    UI.renderLoading();
+
+    const loaded = await this.load({ showLoading: false });
+
+    if (loaded && State.token) {
+      this.startAutoRefresh();
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (
+        document.visibilityState === "visible" &&
+        State.token &&
+        !State.loading
+      ) {
+        this.load({ showLoading: false });
+      }
+    });
   },
 
-  async load() {
-    const raw = await API.fetchAssignments(State.token);
-    
-    if (raw.errorcode) {
-      localStorage.removeItem("token");
-      alert("세션 만료됨. 다시 로그인하세요.");
-      UI.renderLogin();
-      return;
+  async load({ showLoading = false } = {}) {
+    if (State.loading || !State.token) return false;
+
+    State.loading = true;
+
+    if (showLoading) {
+      UI.renderLoading();
     }
-    
-    let data = Data.normalize(raw);
-    data = Data.sort(data);
-    data = Filter.apply(data);
 
-    State.data = data;
+    try {
+      const raw = await API.fetchAssignments(State.token);
 
-    UI.renderDashboard(data);
+      if (raw?.errorcode || raw?.exception) {
+        Store.remove("token");
+        State.token = null;
 
-    //await Notify.request();
-    //Notify.check(data);
+        UI.renderLogin();
+        UI.setAuthError("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+
+        return false;
+      }
+
+      let data = Data.normalize(raw);
+      data = Filter.apply(data);
+      data = Data.sort(data);
+
+      State.data = data;
+      UI.renderDashboard(data);
+
+      return true;
+    } catch (error) {
+      console.error("[App.load]", error);
+
+      const message =
+        error?.name === "AbortError"
+          ? "서버 응답 시간이 초과되었습니다."
+          : "과제 정보를 불러오지 못했습니다. 네트워크를 확인해 주세요.";
+
+      if (State.data.length > 0) {
+        UI.renderDashboard(State.data);
+        UI.toast(message);
+      } else {
+        UI.renderLogin();
+        UI.setAuthError(message);
+      }
+
+      return false;
+    } finally {
+      State.loading = false;
+    }
   },
 
   startAutoRefresh() {
-    if (State.interval) clearInterval(State.interval);
+    if (State.interval) {
+      clearInterval(State.interval);
+    }
 
-    State.interval = setInterval(() => {
-      this.load();
-    }, 60000);
-  },
-
-  showLogin() {
-    UI.renderLogin();
+    State.interval = window.setInterval(() => {
+      if (
+        document.visibilityState === "visible" &&
+        State.token &&
+        !State.loading
+      ) {
+        this.load({ showLoading: false });
+      }
+    }, REFRESH_INTERVAL_MS);
   }
 };
+
+// =========================
+// BOOT
+// =========================
+window.addEventListener("DOMContentLoaded", () => {
+  App.init().catch(error => {
+    console.error("[Boot]", error);
+
+    // 초기화 자체가 실패하더라도 빈 화면에 갇히지 않도록 마지막 방어선.
+    try {
+      UI.initRefs();
+      UI.renderLogin();
+      UI.setAuthError("앱 초기화 중 오류가 발생했습니다. 다시 실행해 주세요.");
+    } catch (fallbackError) {
+      console.error("[Boot fallback]", fallbackError);
+    }
+  });
+});
