@@ -1,17 +1,26 @@
 // =========================================================
-// JJFK Assignment Hub v4
-// - 기존 Moodle API/토큰 구조 유지
-// - Liquid Glass UI용 DOM 렌더링
-// - 네트워크/중복 로드/서비스워커 업데이트 안정성 보강
+// JJFK Assignment Hub v4.1
+// - Liquid Glass UI 유지
+// - 화면 남은 시간 갱신과 Moodle 네트워크 갱신 완전 분리
+// - iOS/PWA 타이머 정지·백그라운드 복귀 대응
+// - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4-liquid";
+const APP_VERSION = "4.1-liquid";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
-const REFRESH_INTERVAL_MS = 60_000;
+
+// 서버에서 새 과제/마감 변경을 확인하는 주기입니다.
+const NETWORK_REFRESH_INTERVAL_MS = 60_000;
+
+// 화면의 남은 시간은 서버 요청과 무관하게 로컬 시계로 갱신합니다.
+// 표시 단위가 '분'이므로 10초 주기로 충분하며 경계 전환도 자연스럽습니다.
+const CLOCK_TICK_INTERVAL_MS = 10_000;
+
+// 과제 필터 구조(16일/마감 1일)를 다시 계산하는 주기입니다.
+const LOCAL_RECONCILE_INTERVAL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 
-// 현재 프로젝트의 기존 필터 정책을 유지합니다.
 const MAX_FUTURE_DAYS = 16;
 const MAX_PAST_MS = 86_400_000;
 
@@ -20,10 +29,22 @@ const MAX_PAST_MS = 86_400_000;
 // =========================
 const State = {
   token: null,
+
+  // 서버에서 받은 전체 정규화 데이터
+  allData: [],
+
+  // 현재 화면에 표시 중인 필터/정렬 데이터
   data: [],
-  interval: null,
+
+  // setInterval 대신 재귀 setTimeout을 사용합니다.
+  // iOS에서 긴 작업 뒤 주기가 겹치는 문제를 피할 수 있습니다.
+  refreshTimer: null,
+  clockTimer: null,
+
   loading: false,
-  initialized: false
+  initialized: false,
+  lastFetchAt: 0,
+  lastReconcileAt: 0
 };
 
 // =========================
@@ -94,7 +115,7 @@ function formatDeadline(timestamp) {
 
 async function fetchJSON(url, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, {
@@ -116,7 +137,7 @@ async function fetchJSON(url, timeoutMs = FETCH_TIMEOUT_MS) {
       throw new Error("서버 응답이 올바른 JSON 형식이 아닙니다.");
     }
   } finally {
-    clearTimeout(timeout);
+    window.clearTimeout(timeout);
   }
 }
 
@@ -156,14 +177,14 @@ const Auth = {
 
   logout() {
     Store.remove("token");
+
     State.token = null;
+    State.allData = [];
     State.data = [];
+    State.lastFetchAt = 0;
+    State.lastReconcileAt = 0;
 
-    if (State.interval) {
-      clearInterval(State.interval);
-      State.interval = null;
-    }
-
+    App.stopSchedulers();
     UI.renderLogin();
   }
 };
@@ -223,7 +244,6 @@ const Data = {
       )
     }));
 
-    // 과목 그룹 역시 가장 가까운 과제 마감일 순으로 배치합니다.
     sorted.sort((a, b) => {
       const aFirst = a.assignments[0]?.deadline ?? Infinity;
       const bFirst = b.assignments[0]?.deadline ?? Infinity;
@@ -280,16 +300,18 @@ const Logic = {
   },
 
   formatRemain(ms) {
-    const d = Math.floor(ms / 86_400_000);
-    const h = Math.floor((ms % 86_400_000) / 3_600_000);
-    const m = Math.floor((ms % 3_600_000) / 60_000);
+    const safeMs = Math.max(0, ms);
+    const d = Math.floor(safeMs / 86_400_000);
+    const h = Math.floor((safeMs % 86_400_000) / 3_600_000);
+    const m = Math.floor((safeMs % 3_600_000) / 60_000);
 
     return `${d}일 ${h}시간 ${m}분 남음`;
   },
 
   formatPassed(ms) {
-    const h = Math.floor(ms / 3_600_000);
-    const m = Math.floor((ms % 3_600_000) / 60_000);
+    const safeMs = Math.max(0, ms);
+    const h = Math.floor(safeMs / 3_600_000);
+    const m = Math.floor((safeMs % 3_600_000) / 60_000);
 
     return `마감 ${h}시간 ${m}분 경과`;
   }
@@ -344,8 +366,8 @@ const UI = {
 
         if (this.loginPw) this.loginPw.value = "";
 
-        await App.load({ showLoading: true });
-        App.startAutoRefresh();
+        const loaded = await App.load({ showLoading: true });
+        if (loaded) App.startSchedulers();
       } catch (error) {
         const message =
           error?.name === "AbortError"
@@ -385,8 +407,12 @@ const UI = {
     this.setLoginBusy(false);
     this.show(this.loginLayer);
 
-    requestAnimationFrame(() => {
-      this.loginId?.focus({ preventScroll: true });
+    window.requestAnimationFrame(() => {
+      try {
+        this.loginId?.focus({ preventScroll: true });
+      } catch {
+        this.loginId?.focus();
+      }
     });
   },
 
@@ -422,14 +448,18 @@ const UI = {
     const html = data.map(course => {
       const assignments = course.assignments.map(assignment => {
         const status = Logic.calcStatus(assignment.deadline);
+        const deadline = Number(assignment.deadline);
 
         return `
-          <article class="assignment-row">
+          <article class="assignment-row" data-assignment-id="${escapeHTML(assignment.id)}">
             <div class="assignment-main">
               <div class="assignment-title">${escapeHTML(assignment.title)}</div>
-              <div class="assignment-deadline">마감 ${formatDeadline(assignment.deadline)}</div>
+              <div class="assignment-deadline">마감 ${formatDeadline(deadline)}</div>
             </div>
-            <div class="status ${status.color}">${escapeHTML(status.text)}</div>
+            <div
+              class="status ${status.color}"
+              data-deadline="${deadline}"
+            >${escapeHTML(status.text)}</div>
           </article>
         `;
       }).join("");
@@ -448,6 +478,26 @@ const UI = {
     }).join("");
 
     this.appView.innerHTML = html;
+  },
+
+  // 서버 요청 없이 현재 DOM의 남은 시간만 갱신합니다.
+  updateCountdowns() {
+    if (!this.appView || !this.dashboardLayer?.classList.contains("active")) {
+      return;
+    }
+
+    const elements = this.appView.querySelectorAll(".status[data-deadline]");
+
+    elements.forEach(element => {
+      const deadline = Number(element.dataset.deadline);
+      if (!Number.isFinite(deadline)) return;
+
+      const status = Logic.calcStatus(deadline);
+
+      element.textContent = status.text;
+      element.classList.remove("green", "orange", "red");
+      element.classList.add(status.color);
+    });
   },
 
   setLoginBusy(busy) {
@@ -486,9 +536,6 @@ const PWA = {
     if (!("serviceWorker" in navigator)) return;
     if (location.protocol !== "https:" && location.hostname !== "localhost") return;
 
-    const hadController = Boolean(navigator.serviceWorker.controller);
-    const reloadKey = `jjfk-sw-reloaded-${APP_VERSION}`;
-
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
@@ -496,17 +543,10 @@ const PWA = {
           { scope: "./" }
         );
 
-        // GitHub Pages/PWA에서 장시간 열린 경우에도 새 SW를 확인합니다.
+        // 새 SW가 있는지만 확인합니다.
+        // v4의 controllerchange 강제 reload는 제거했습니다.
+        // 실행 중인 화면을 갑자기 재로드시키지 않습니다.
         registration.update().catch(() => {});
-
-        if (hadController) {
-          navigator.serviceWorker.addEventListener("controllerchange", () => {
-            if (sessionStorage.getItem(reloadKey)) return;
-
-            sessionStorage.setItem(reloadKey, "1");
-            window.location.reload();
-          });
-        }
       } catch (error) {
         console.warn("[PWA] Service Worker 등록 실패", error);
       }
@@ -543,21 +583,13 @@ const App = {
     const loaded = await this.load({ showLoading: false });
 
     if (loaded && State.token) {
-      this.startAutoRefresh();
+      this.startSchedulers();
     }
 
-    document.addEventListener("visibilitychange", () => {
-      if (
-        document.visibilityState === "visible" &&
-        State.token &&
-        !State.loading
-      ) {
-        this.load({ showLoading: false });
-      }
-    });
+    this.bindResumeEvents();
   },
 
-  async load({ showLoading = false } = {}) {
+  async load({ showLoading = false, silent = false } = {}) {
     if (State.loading || !State.token) return false;
 
     State.loading = true;
@@ -572,6 +604,9 @@ const App = {
       if (raw?.errorcode || raw?.exception) {
         Store.remove("token");
         State.token = null;
+        State.allData = [];
+        State.data = [];
+        this.stopSchedulers();
 
         UI.renderLogin();
         UI.setAuthError("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
@@ -579,12 +614,10 @@ const App = {
         return false;
       }
 
-      let data = Data.normalize(raw);
-      data = Filter.apply(data);
-      data = Data.sort(data);
+      State.allData = Data.normalize(raw);
+      State.lastFetchAt = Date.now();
 
-      State.data = data;
-      UI.renderDashboard(data);
+      this.reconcileLocalData({ forceRender: true });
 
       return true;
     } catch (error) {
@@ -595,9 +628,12 @@ const App = {
           ? "서버 응답 시간이 초과되었습니다."
           : "과제 정보를 불러오지 못했습니다. 네트워크를 확인해 주세요.";
 
-      if (State.data.length > 0) {
-        UI.renderDashboard(State.data);
-        UI.toast(message);
+      // 네트워크가 실패해도 기존 데이터의 카운트다운은 계속 유지합니다.
+      if (State.allData.length > 0 || State.data.length > 0) {
+        this.reconcileLocalData({ forceRender: State.data.length === 0 });
+        UI.updateCountdowns();
+
+        if (!silent) UI.toast(message);
       } else {
         UI.renderLogin();
         UI.setAuthError(message);
@@ -609,20 +645,120 @@ const App = {
     }
   },
 
-  startAutoRefresh() {
-    if (State.interval) {
-      clearInterval(State.interval);
+  reconcileLocalData({ forceRender = false } = {}) {
+    if (!Array.isArray(State.allData)) return;
+
+    const nextData = Data.sort(Filter.apply(State.allData));
+    State.lastReconcileAt = Date.now();
+
+    // 구조 변화 확인용 가벼운 signature.
+    // 구조가 같으면 전체 DOM 재생성을 피하고 상태 텍스트만 갱신합니다.
+    const makeSignature = data => data
+      .map(course =>
+        `${course.courseName}:${course.assignments.map(a => `${a.id}@${a.deadline}`).join(",")}`
+      )
+      .join("|");
+
+    const changed = makeSignature(State.data) !== makeSignature(nextData);
+    State.data = nextData;
+
+    if (forceRender || changed) {
+      UI.renderDashboard(State.data);
+    } else {
+      UI.updateCountdowns();
+    }
+  },
+
+  startSchedulers() {
+    this.stopSchedulers();
+
+    this.scheduleClockTick(0);
+    this.scheduleNetworkRefresh(NETWORK_REFRESH_INTERVAL_MS);
+  },
+
+  stopSchedulers() {
+    if (State.refreshTimer !== null) {
+      window.clearTimeout(State.refreshTimer);
+      State.refreshTimer = null;
     }
 
-    State.interval = window.setInterval(() => {
-      if (
-        document.visibilityState === "visible" &&
-        State.token &&
-        !State.loading
-      ) {
-        this.load({ showLoading: false });
+    if (State.clockTimer !== null) {
+      window.clearTimeout(State.clockTimer);
+      State.clockTimer = null;
+    }
+  },
+
+  scheduleClockTick(delay = CLOCK_TICK_INTERVAL_MS) {
+    if (!State.token) return;
+
+    if (State.clockTimer !== null) {
+      window.clearTimeout(State.clockTimer);
+    }
+
+    State.clockTimer = window.setTimeout(() => {
+      State.clockTimer = null;
+
+      if (State.token && document.visibilityState !== "hidden") {
+        UI.updateCountdowns();
+
+        if (Date.now() - State.lastReconcileAt >= LOCAL_RECONCILE_INTERVAL_MS) {
+          this.reconcileLocalData();
+        }
       }
-    }, REFRESH_INTERVAL_MS);
+
+      this.scheduleClockTick(CLOCK_TICK_INTERVAL_MS);
+    }, Math.max(0, delay));
+  },
+
+  scheduleNetworkRefresh(delay = NETWORK_REFRESH_INTERVAL_MS) {
+    if (!State.token) return;
+
+    if (State.refreshTimer !== null) {
+      window.clearTimeout(State.refreshTimer);
+    }
+
+    State.refreshTimer = window.setTimeout(async () => {
+      State.refreshTimer = null;
+
+      if (State.token && document.visibilityState !== "hidden") {
+        // 완료 후 다음 주기를 예약하므로 느린 요청이 겹치지 않습니다.
+        await this.load({ showLoading: false, silent: true });
+      }
+
+      this.scheduleNetworkRefresh(NETWORK_REFRESH_INTERVAL_MS);
+    }, Math.max(0, delay));
+  },
+
+  bindResumeEvents() {
+    const resume = () => {
+      if (!State.token) return;
+
+      // iOS가 setTimeout을 정지시켰다가 앱을 되살린 경우 즉시 보정합니다.
+      UI.updateCountdowns();
+      this.reconcileLocalData();
+
+      const stale = Date.now() - State.lastFetchAt >= NETWORK_REFRESH_INTERVAL_MS;
+
+      if (stale && !State.loading) {
+        this.load({ showLoading: false, silent: true });
+      }
+
+      // iOS에서 타이머 자체가 유실된 상황도 다시 살립니다.
+      if (State.clockTimer === null) {
+        this.scheduleClockTick(CLOCK_TICK_INTERVAL_MS);
+      }
+
+      if (State.refreshTimer === null) {
+        this.scheduleNetworkRefresh(NETWORK_REFRESH_INTERVAL_MS);
+      }
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") resume();
+    });
+
+    window.addEventListener("pageshow", resume);
+    window.addEventListener("focus", resume);
   }
 };
 
@@ -633,7 +769,6 @@ window.addEventListener("DOMContentLoaded", () => {
   App.init().catch(error => {
     console.error("[Boot]", error);
 
-    // 초기화 자체가 실패하더라도 빈 화면에 갇히지 않도록 마지막 방어선.
     try {
       UI.initRefs();
       UI.renderLogin();

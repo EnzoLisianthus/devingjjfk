@@ -1,17 +1,17 @@
 // =========================================================
-// JJFK PWA Service Worker v4
+// JJFK PWA Service Worker v4.1
 // - 알림 기능 제거: 캐싱/오프라인 셸만 담당
 // - cross-origin Moodle API 요청은 절대 캐시하지 않음
 // - 새 버전 설치 시 즉시 활성화
 // =========================================================
 
-const CACHE_NAME = "jjfk-cache-v4-liquid";
+const CACHE_NAME = "jjfk-cache-v4.1-liquid";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=4",
-  "./app.js?v=4",
+  "./style.css?v=4.1",
+  "./app.js?v=4.1",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
