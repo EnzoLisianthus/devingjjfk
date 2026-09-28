@@ -1,12 +1,12 @@
 // =========================================================
-// JJFK Assignment Hub v4.2 DEBUG
+// JJFK Assignment Hub v4.3 DEBUG
 // - Liquid Glass UI 유지
 // - 화면 남은 시간 갱신과 Moodle 네트워크 갱신 완전 분리
 // - iOS/PWA 타이머 정지·백그라운드 복귀 대응
 // - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4.2-liquid-debug";
+const APP_VERSION = "4.3-liquid-debug";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 
@@ -128,7 +128,14 @@ const DebugBackend = {
 
   isDebugUsername(username) {
     if (!DEBUG_BACKEND_ENABLED) return false;
-    const value = String(username ?? "").trim().toLowerCase();
+
+    // 모바일 자동완성/복붙에서 앞뒤 공백이나 일반 공백이 섞여도
+    // 디버그 계정을 실제 Moodle 서버로 보내지 않도록 먼저 정규화합니다.
+    const value = String(username ?? "")
+      .replace(/\s+/g, "")
+      .trim()
+      .toLowerCase();
+
     return value === DEBUG_USERNAME || value === DEBUG_USERNAME_ALIAS;
   },
 
@@ -589,6 +596,35 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
+// Moodle은 일부 오류 메시지에 <br>, <span> 같은 HTML 조각을 담아 반환합니다.
+// 에러 영역에는 HTML을 실행하지 않고 사람이 읽을 수 있는 평문만 표시합니다.
+function serverMessageToText(value) {
+  if (value === null || value === undefined) return "";
+
+  let source = String(value);
+
+  // DOMParser의 textContent는 <br>을 줄바꿈으로 보존하지 않으므로 먼저 치환합니다.
+  source = source
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/p\s*>/gi, "\n")
+    .replace(/<\/div\s*>/gi, "\n");
+
+  try {
+    const doc = new DOMParser().parseFromString(source, "text/html");
+    source = doc.body?.textContent ?? source;
+  } catch {
+    // DOMParser가 없는 특수 환경에서는 최소한의 태그 제거만 수행합니다.
+    source = source.replace(/<[^>]*>/g, "");
+  }
+
+  return source
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function formatDeadline(timestamp) {
   const date = new Date(timestamp);
 
@@ -663,8 +699,13 @@ const Auth = {
     const data = await fetchJSON(url);
 
     if (!data?.token) {
-      const message = data?.error || data?.errorcode || "로그인에 실패했습니다.";
-      throw new Error(String(message));
+      const rawMessage =
+        data?.error ||
+        data?.message ||
+        data?.errorcode ||
+        "로그인에 실패했습니다.";
+
+      throw new Error(serverMessageToText(rawMessage));
     }
 
     Store.set("token", data.token);
@@ -1041,7 +1082,8 @@ const UI = {
   },
 
   setAuthError(message) {
-    if (this.authError) this.authError.textContent = message ?? "";
+    if (!this.authError) return;
+    this.authError.textContent = serverMessageToText(message);
   },
 
   toast(message, duration = 2800) {
@@ -1072,8 +1114,11 @@ const PWA = {
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
-          "./service-worker.js",
-          { scope: "./" }
+          "./service-worker.js?v=4.3",
+          {
+            scope: "./",
+            updateViaCache: "none"
+          }
         );
 
         // 새 SW가 있는지만 확인합니다.
@@ -1309,6 +1354,9 @@ const App = {
 // BOOT
 // =========================
 window.addEventListener("DOMContentLoaded", () => {
+  console.info(`[JJFK] ${APP_VERSION}`);
+  document.documentElement.dataset.jjfkBuild = APP_VERSION;
+
   App.init().catch(error => {
     console.error("[Boot]", error);
 

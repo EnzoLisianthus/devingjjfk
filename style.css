@@ -445,7 +445,10 @@ button {
   min-height: 0;
   color: var(--red);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }
 
 .auth-error:not(:empty) {

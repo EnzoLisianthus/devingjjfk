@@ -130,3 +130,10 @@ mod_assign_get_assignments
 ## 📄 License
 
 MIT License
+
+
+## v4.3 debug fix
+- Debug ID: `0000000000` or `debug`
+- Debug PW: `normal`, `massive`, `deadline`, `changes`, `slow`, `flaky`, `empty`, `malformed`, `apierror`, `loginfail`, `help`
+- HTML이 포함된 Moodle 로그인 오류는 안전한 평문으로 변환해 표시합니다.
+- app/style은 network-first로 갱신하여 오래된 Service Worker 캐시 문제를 줄였습니다.
