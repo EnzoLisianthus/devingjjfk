@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <!-- =========================
+       MOBILE OPTIMIZATION (핵심)
+  ========================== -->
+  <meta name="viewport"
+        content="width=device-width,
+                 initial-scale=1,
+                 maximum-scale=1,
+                 user-scalable=no,
+                 viewport-fit=cover">
+
+  <meta name="theme-color" content="#0b0f1a" />
+
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Assignment Hub" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+
+  <title>Assignment Hub</title>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+<!-- =========================
+     APP ROOT
+========================== -->
+<div id="app">
+
+  <!-- =========================
+       LOADING
+  ========================== -->
+  <section id="loading-layer" class="layer active">
+    <div class="center">
+      <div class="spinner"></div>
+      <div class="text">Loading</div>
+    </div>
+  </section>
+
+  <!-- =========================
+       LOGIN
+  ========================== -->
+  <section id="login-layer" class="layer">
+
+    <div class="auth-container">
+
+      <div class="auth-card">
+
+        <div class="auth-header">
+          <div class="auth-title">Welcome</div>
+          <div class="auth-subtitle">Assignment Hub</div>
+        </div>
+
+        <div class="auth-form">
+          <input id="login-id" type="text" placeholder="Student ID" />
+          <input id="login-pw" type="password" placeholder="Password" />
+        </div>
+
+        <button id="login-btn" class="primary-btn">Login</button>
+
+        <div class="auth-hint">
+          Cyber Campus System
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- =========================
+       DASHBOARD
+  ========================== -->
+  <section id="dashboard-layer" class="layer">
+
+    <!-- TOP BAR -->
+    <header class="top-bar">
+      <div class="top-left">
+        <div class="app-title">전주대 과제확인</div>
+        <div class="app-subtitle">만든놈:daxun</div>
+      </div>
+
+      <button id="logout-btn" class="ghost-btn"></button>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main id="app-view" class="content">
+
+      <div class="empty-state">
+        Loading assignments...
+      </div>
+
+    </main>
+
+  </section>
+
+  <!-- =========================
+       MODAL SYSTEM
+  ========================== -->
+  <div id="modal-layer" class="overlay"></div>
+
+  <!-- =========================
+       TOAST SYSTEM
+  ========================== -->
+  <div id="toast-layer" class="toast-container"></div>
+
+  <!-- =========================
+       SAFE AREA FIX (iOS notch)
+  ========================== -->
+  <div class="safe-area-bottom"></div>
+
+</div>
+
+<!-- SCRIPT -->
+<script src="app.js?v=2" defer></script>
+
+</body>
+</html>
