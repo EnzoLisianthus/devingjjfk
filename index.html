@@ -8,7 +8,7 @@
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
   />
 
-  <meta name="theme-color" content="#080b12" />
+  <meta name="theme-color" content="#0b0c10" />
   <meta name="color-scheme" content="dark" />
 
   <!-- iOS PWA -->
@@ -23,7 +23,7 @@
   <title>Assignment Hub</title>
 
   <!-- 버전 쿼리는 설치된 PWA가 새 CSS를 확실히 다시 받도록 유지 -->
-  <link rel="stylesheet" href="style.css?v=4.4" />
+  <link rel="stylesheet" href="style.css?v=4.5" />
 </head>
 
 <body>
@@ -108,7 +108,22 @@
       </header>
 
       <main id="app-view" class="content" aria-live="polite">
-        <div class="empty-state">과제 정보를 불러오는 중입니다.</div>
+        <div
+          id="pull-refresh-indicator"
+          class="pull-refresh-indicator"
+          role="status"
+          aria-live="polite"
+          aria-hidden="true"
+        >
+          <div class="pull-refresh-pill">
+            <span class="pull-refresh-symbol" aria-hidden="true"></span>
+            <span id="pull-refresh-text">당겨서 새로고침</span>
+          </div>
+        </div>
+
+        <div id="scroll-stage" class="scroll-stage">
+          <div class="empty-state">과제 정보를 불러오는 중입니다.</div>
+        </div>
       </main>
     </section>
 
@@ -119,6 +134,6 @@
     <div id="toast-layer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
   </div>
 
-  <script src="app.js?v=4.4" defer></script>
+  <script src="app.js?v=4.5" defer></script>
 </body>
 </html>

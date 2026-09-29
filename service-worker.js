@@ -1,18 +1,18 @@
 // =========================================================
-// JJFK PWA Service Worker v4.4
+// JJFK PWA Service Worker v4.5
 // - Moodle/cross-origin 요청은 절대 가로채거나 캐시하지 않음
 // - HTML/JS/CSS는 network-first: 배포 직후 새 코드를 우선 확인
 // - manifest/icons는 cache-first
 // - 오프라인에서는 마지막 정상 앱 셸로 fallback
 // =========================================================
 
-const CACHE_NAME = "jjfk-cache-v4.4-liquid-debug-keyword";
+const CACHE_NAME = "jjfk-cache-v4.5-elastic-refresh";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=4.4",
-  "./app.js?v=4.4",
+  "./style.css?v=4.5",
+  "./app.js?v=4.5",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

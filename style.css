@@ -1,5 +1,5 @@
 /* =========================================================
-   JJFK Liquid Glass UI v4.4-muted
+   JJFK Liquid Glass UI v4.5-elastic-refresh
    - iOS standalone PWA 우선
    - 상단 시스템 영역은 웹 blur로 덮지 않음
    - backdrop-filter는 로그인 패널/과목 surface처럼 큰 계층에만 적용
@@ -540,9 +540,11 @@ button {
 }
 
 /* =========================
-   9. CONTENT
+   9. CONTENT / ELASTIC EDGE / PULL TO REFRESH
 ========================= */
 .content {
+  position: relative;
+
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -551,11 +553,10 @@ button {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 
-  padding:
-    6px
-    16px
-    calc(24px + env(safe-area-inset-bottom));
-
+  /*
+    실제로 스크롤 가능한 경우에는 iOS의 네이티브 관성/끝단 탄성을 그대로 둡니다.
+    스크롤할 내용이 짧은 경우에만 JS가 scroll-stage를 탄성 이동시킵니다.
+  */
   overscroll-behavior-y: contain;
   scrollbar-width: none;
 }
@@ -564,10 +565,157 @@ button {
   display: none;
 }
 
-#app-view {
+/*
+  실제 콘텐츠는 별도 stage에 둡니다.
+  최소 높이를 100%로 유지하므로 과제가 한두 개뿐이어도
+  끝단 제스처를 받을 수 있고, JS가 stage만 안전하게 transform할 수 있습니다.
+*/
+.scroll-stage {
+  position: relative;
+  z-index: 2;
+
+  min-height: 100%;
+  width: 100%;
+
   display: flex;
   flex-direction: column;
   gap: 19px;
+
+  padding:
+    6px
+    16px
+    calc(24px + env(safe-area-inset-bottom));
+
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.46s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.scroll-stage.is-dragging {
+  transition: none;
+}
+
+.scroll-stage.is-refreshing {
+  transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+  iOS의 네이티브 pull/bounce가 존재하는 긴 목록에서는 indicator만 표시하고,
+  짧은 목록에서는 scroll-stage가 내려오며 indicator가 자연스럽게 드러납니다.
+*/
+.pull-refresh-indicator {
+  position: absolute;
+  z-index: 12;
+  top: 7px;
+  left: 50%;
+
+  pointer-events: none;
+
+  opacity: 0;
+  transform: translate3d(-50%, -12px, 0) scale(0.94);
+
+  transition:
+    opacity 0.16s ease,
+    transform 0.20s var(--ease-ios);
+}
+
+.pull-refresh-indicator.is-visible {
+  opacity: 1;
+}
+
+.pull-refresh-indicator.is-ready {
+  transform: translate3d(-50%, 2px, 0) scale(1);
+}
+
+.pull-refresh-indicator.is-refreshing {
+  opacity: 1;
+  transform: translate3d(-50%, 4px, 0) scale(1);
+}
+
+.pull-refresh-pill {
+  min-height: 34px;
+  max-width: min(76vw, 250px);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 7px 12px;
+
+  border: 1px solid rgba(255, 255, 255, 0.105);
+  border-radius: 999px;
+
+  background: rgba(22, 23, 28, 0.76);
+
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
+
+  box-shadow:
+    0 8px 26px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pull-refresh-symbol {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.pull-refresh-symbol::before {
+  content: "↓";
+
+  position: absolute;
+  inset: 0;
+
+  display: grid;
+  place-items: center;
+
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1;
+
+  transform: rotate(0deg);
+  transition: transform 0.18s var(--ease-ios);
+}
+
+.pull-refresh-indicator.is-ready .pull-refresh-symbol::before {
+  transform: rotate(180deg);
+}
+
+.pull-refresh-indicator.is-refreshing .pull-refresh-symbol::before {
+  content: "";
+
+  inset: 1px;
+
+  border: 1.6px solid rgba(255, 255, 255, 0.24);
+  border-top-color: rgba(255, 255, 255, 0.90);
+  border-radius: 50%;
+
+  animation: spin 0.72s linear infinite;
+}
+
+/* refresh가 끝났을 때 잠깐 성공/실패 상태를 보여 줍니다. */
+.pull-refresh-indicator.is-result .pull-refresh-symbol::before {
+  content: "✓";
+  transform: none;
+}
+
+.pull-refresh-indicator.is-result.is-failed .pull-refresh-symbol::before {
+  content: "!";
+}
+
+/* 하드웨어 가속 레이어를 고정해 작은 탄성 이동에서 텍스트가 흔들리지 않게 합니다. */
+.course-block,
+.empty-state {
+  transform: translateZ(0);
 }
 
 /* =========================
@@ -830,7 +978,7 @@ button {
 }
 
 @media (max-width: 360px) {
-  .content {
+  .scroll-stage {
     padding-left: 12px;
     padding-right: 12px;
   }

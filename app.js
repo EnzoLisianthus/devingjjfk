@@ -1,12 +1,12 @@
 // =========================================================
-// JJFK Assignment Hub v4.4 DEBUG KEYWORD
+// JJFK Assignment Hub v4.5 ELASTIC REFRESH
 // - Liquid Glass UI 유지
 // - 화면 남은 시간 갱신과 Moodle 네트워크 갱신 완전 분리
 // - iOS/PWA 타이머 정지·백그라운드 복귀 대응
 // - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4.4-liquid-debug-keyword";
+const APP_VERSION = "4.5-elastic-refresh";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 
@@ -68,7 +68,10 @@ const State = {
   loading: false,
   initialized: false,
   lastFetchAt: 0,
-  lastReconcileAt: 0
+  lastReconcileAt: 0,
+
+  // pull-to-refresh 중복 실행 방지용 Promise
+  manualRefreshPromise: null
 };
 
 // =========================
@@ -739,8 +742,10 @@ const Auth = {
     State.data = [];
     State.lastFetchAt = 0;
     State.lastReconcileAt = 0;
+    State.manualRefreshPromise = null;
 
     App.stopSchedulers();
+    ElasticScroll.reset({ immediate: true });
     UI.renderLogin();
   }
 };
@@ -885,6 +890,9 @@ const UI = {
   loginLayer: null,
   dashboardLayer: null,
   appView: null,
+  scrollStage: null,
+  pullRefreshIndicator: null,
+  pullRefreshText: null,
   loadingText: null,
   loginForm: null,
   loginId: null,
@@ -900,6 +908,9 @@ const UI = {
     this.loginLayer = document.getElementById("login-layer");
     this.dashboardLayer = document.getElementById("dashboard-layer");
     this.appView = document.getElementById("app-view");
+    this.scrollStage = document.getElementById("scroll-stage");
+    this.pullRefreshIndicator = document.getElementById("pull-refresh-indicator");
+    this.pullRefreshText = document.getElementById("pull-refresh-text");
     this.loadingText = document.getElementById("loading-text");
     this.loginForm = document.getElementById("login-form");
     this.loginId = document.getElementById("login-id");
@@ -995,12 +1006,12 @@ const UI = {
   },
 
   renderDashboard(data) {
-    if (!this.appView) return;
+    if (!this.scrollStage) return;
 
     this.show(this.dashboardLayer);
 
     if (!Array.isArray(data) || data.length === 0) {
-      this.appView.innerHTML = `
+      this.scrollStage.innerHTML = `
         <div class="empty-state">
           현재 표시할 과제가 없습니다.
         </div>
@@ -1040,16 +1051,16 @@ const UI = {
       `;
     }).join("");
 
-    this.appView.innerHTML = html;
+    this.scrollStage.innerHTML = html;
   },
 
   // 서버 요청 없이 현재 DOM의 남은 시간만 갱신합니다.
   updateCountdowns() {
-    if (!this.appView || !this.dashboardLayer?.classList.contains("active")) {
+    if (!this.scrollStage || !this.dashboardLayer?.classList.contains("active")) {
       return;
     }
 
-    const elements = this.appView.querySelectorAll(".status[data-deadline]");
+    const elements = this.scrollStage.querySelectorAll(".status[data-deadline]");
 
     elements.forEach(element => {
       const deadline = Number(element.dataset.deadline);
@@ -1118,6 +1129,377 @@ const UI = {
   }
 };
 
+
+// =========================
+// ELASTIC EDGE / PULL TO REFRESH
+// =========================
+// 목표:
+// 1) 실제로 스크롤 가능한 긴 목록에서는 iOS의 네이티브 관성/끝단 탄성을 유지합니다.
+// 2) 스크롤할 내용이 짧아 네이티브 탄성이 생기지 않는 경우에만 scroll-stage를
+//    직접 이동시켜 위/아래 양쪽 끝에 부드러운 탄성을 제공합니다.
+// 3) 최상단에서 아래로 충분히 당겼다가 놓으면 App.manualRefresh()를 호출하여
+//    Moodle API를 즉시 한 번 더 조회합니다.
+const ElasticScroll = {
+  container: null,
+  stage: null,
+  indicator: null,
+  indicatorText: null,
+
+  initialized: false,
+  tracking: false,
+  refreshing: false,
+  synthetic: false,
+  startedAtTop: false,
+
+  startX: 0,
+  startY: 0,
+  lastX: 0,
+  lastY: 0,
+  rawY: 0,
+
+  releaseThreshold: 92,
+  maxVisualOffset: 96,
+  holdOffset: 48,
+
+  resultTimer: null,
+
+  init() {
+    if (this.initialized) return;
+
+    this.container = UI.appView;
+    this.stage = UI.scrollStage;
+    this.indicator = UI.pullRefreshIndicator;
+    this.indicatorText = UI.pullRefreshText;
+
+    if (!this.container || !this.stage || !this.indicator || !this.indicatorText) {
+      console.warn("[ElasticScroll] 필요한 DOM을 찾지 못했습니다.");
+      return;
+    }
+
+    this.container.addEventListener(
+      "touchstart",
+      event => this.onTouchStart(event),
+      { passive: true }
+    );
+
+    this.container.addEventListener(
+      "touchmove",
+      event => this.onTouchMove(event),
+      { passive: false }
+    );
+
+    this.container.addEventListener(
+      "touchend",
+      event => this.onTouchEnd(event),
+      { passive: true }
+    );
+
+    this.container.addEventListener(
+      "touchcancel",
+      () => this.cancelGesture(),
+      { passive: true }
+    );
+
+    this.initialized = true;
+  },
+
+  isDashboardActive() {
+    return Boolean(
+      State.token &&
+      UI.dashboardLayer?.classList.contains("active")
+    );
+  },
+
+  isScrollable() {
+    if (!this.container) return false;
+    return this.container.scrollHeight > this.container.clientHeight + 2;
+  },
+
+  isAtTop() {
+    return !this.container || this.container.scrollTop <= 1;
+  },
+
+  isAtBottom() {
+    if (!this.container) return true;
+
+    const maxScrollTop = Math.max(
+      0,
+      this.container.scrollHeight - this.container.clientHeight
+    );
+
+    return this.container.scrollTop >= maxScrollTop - 1;
+  },
+
+  elasticDistance(rawDistance) {
+    const distance = Math.max(0, Number(rawDistance) || 0);
+
+    // 처음에는 손가락을 잘 따라오고, 멀어질수록 점점 무거워지는 비선형 저항.
+    return this.maxVisualOffset * (1 - Math.exp(-distance / 104));
+  },
+
+  onTouchStart(event) {
+    if (!this.isDashboardActive()) return;
+    if (this.refreshing) return;
+    if (event.touches.length !== 1) return;
+
+    const touch = event.touches[0];
+
+    this.tracking = true;
+    this.synthetic = !this.isScrollable();
+    this.startedAtTop = this.isAtTop();
+
+    this.startX = touch.clientX;
+    this.startY = touch.clientY;
+    this.lastX = touch.clientX;
+    this.lastY = touch.clientY;
+    this.rawY = 0;
+
+    this.stage?.classList.remove("is-refreshing");
+  },
+
+  onTouchMove(event) {
+    if (!this.tracking || this.refreshing) return;
+    if (event.touches.length !== 1) return;
+
+    const touch = event.touches[0];
+    const dx = touch.clientX - this.startX;
+    const dy = touch.clientY - this.startY;
+
+    this.lastX = touch.clientX;
+    this.lastY = touch.clientY;
+
+    // 아직 방향이 분명하지 않을 때는 네이티브 제스처 판정을 방해하지 않습니다.
+    if (Math.abs(dy) < 4 || Math.abs(dy) <= Math.abs(dx) * 1.12) {
+      return;
+    }
+
+    this.rawY = dy;
+
+    if (this.synthetic) {
+      /*
+        짧은 목록: 위/아래 어느 쪽도 실제 scrollTop 변화가 없으므로
+        stage에 직접 탄성을 적용합니다.
+      */
+      event.preventDefault();
+
+      const direction = dy >= 0 ? 1 : -1;
+      const offset = this.elasticDistance(Math.abs(dy)) * direction;
+
+      this.setStageOffset(offset, true);
+
+      if (dy > 0) {
+        this.updatePullIndicator(dy);
+      } else {
+        this.hideIndicator();
+      }
+
+      return;
+    }
+
+    /*
+      긴 목록: iOS의 네이티브 스크롤/끝단 탄성을 그대로 둡니다.
+      최상단에서 시작한 아래 방향 pull만 관찰해 refresh 조건을 계산합니다.
+      여기서는 preventDefault()를 호출하지 않습니다.
+    */
+    if (this.startedAtTop && this.isAtTop() && dy > 0) {
+      this.updatePullIndicator(dy);
+    } else if (dy <= 0 || !this.isAtTop()) {
+      this.hideIndicator();
+    }
+  },
+
+  onTouchEnd() {
+    if (!this.tracking) return;
+
+    const shouldRefresh =
+      this.rawY >= this.releaseThreshold &&
+      this.startedAtTop &&
+      this.isDashboardActive();
+
+    const wasSynthetic = this.synthetic;
+
+    this.tracking = false;
+    this.synthetic = false;
+    this.startedAtTop = false;
+
+    if (shouldRefresh) {
+      void this.performRefresh({ holdStage: wasSynthetic });
+      return;
+    }
+
+    this.snapBack();
+  },
+
+  cancelGesture() {
+    this.tracking = false;
+    this.synthetic = false;
+    this.startedAtTop = false;
+    this.rawY = 0;
+    this.snapBack();
+  },
+
+  setStageOffset(offset, dragging = false) {
+    if (!this.stage) return;
+
+    this.stage.classList.toggle("is-dragging", Boolean(dragging));
+    this.stage.style.transform = `translate3d(0, ${offset.toFixed(2)}px, 0)`;
+  },
+
+  updatePullIndicator(rawDistance) {
+    if (!this.indicator || !this.indicatorText) return;
+
+    const progress = Math.min(
+      1,
+      Math.max(0, rawDistance / this.releaseThreshold)
+    );
+
+    this.indicator.classList.add("is-visible");
+    this.indicator.classList.toggle("is-ready", progress >= 1);
+    this.indicator.classList.remove(
+      "is-refreshing",
+      "is-result",
+      "is-failed"
+    );
+
+    this.indicator.setAttribute("aria-hidden", "false");
+    this.indicatorText.textContent =
+      progress >= 1 ? "놓으면 새로고침" : "당겨서 새로고침";
+
+    // 초반에는 은은하게 나타나고 임계점에 가까워질수록 완전히 보입니다.
+    this.indicator.style.opacity = String(0.18 + progress * 0.82);
+  },
+
+  async performRefresh({ holdStage = false } = {}) {
+    if (this.refreshing || !State.token) {
+      this.snapBack();
+      return;
+    }
+
+    this.refreshing = true;
+    this.rawY = 0;
+
+    if (this.resultTimer !== null) {
+      window.clearTimeout(this.resultTimer);
+      this.resultTimer = null;
+    }
+
+    this.indicator?.classList.remove("is-ready", "is-result", "is-failed");
+    this.indicator?.classList.add("is-visible", "is-refreshing");
+    this.indicator?.setAttribute("aria-hidden", "false");
+
+    if (this.indicator) this.indicator.style.opacity = "1";
+    if (this.indicatorText) this.indicatorText.textContent = "새로고침 중";
+
+    if (holdStage && this.stage) {
+      this.stage.classList.remove("is-dragging");
+      this.stage.classList.add("is-refreshing");
+      this.setStageOffset(this.holdOffset, false);
+    } else {
+      this.setStageOffset(0, false);
+    }
+
+    let ok = false;
+
+    try {
+      ok = await App.manualRefresh();
+    } catch (error) {
+      console.error("[ElasticScroll.refresh]", error);
+      ok = false;
+    }
+
+    if (this.indicator) {
+      this.indicator.classList.remove("is-refreshing", "is-ready");
+      this.indicator.classList.add("is-result");
+      this.indicator.classList.toggle("is-failed", !ok);
+      this.indicator.style.opacity = "1";
+    }
+
+    if (this.indicatorText) {
+      this.indicatorText.textContent = ok ? "업데이트 완료" : "새로고침 실패";
+    }
+
+    this.resultTimer = window.setTimeout(() => {
+      this.resultTimer = null;
+      this.refreshing = false;
+
+      if (this.stage) {
+        this.stage.classList.remove("is-dragging", "is-refreshing");
+        this.setStageOffset(0, false);
+      }
+
+      window.setTimeout(() => {
+        if (!this.refreshing) this.hideIndicator();
+      }, 260);
+    }, 420);
+  },
+
+  snapBack() {
+    if (this.refreshing) return;
+
+    if (this.stage) {
+      this.stage.classList.remove("is-dragging", "is-refreshing");
+      this.setStageOffset(0, false);
+    }
+
+    this.rawY = 0;
+
+    window.setTimeout(() => {
+      if (!this.tracking && !this.refreshing) {
+        this.hideIndicator();
+      }
+    }, 180);
+  },
+
+  hideIndicator() {
+    if (!this.indicator || this.refreshing) return;
+
+    this.indicator.classList.remove(
+      "is-visible",
+      "is-ready",
+      "is-refreshing",
+      "is-result",
+      "is-failed"
+    );
+
+    this.indicator.style.opacity = "";
+    this.indicator.setAttribute("aria-hidden", "true");
+
+    if (this.indicatorText) {
+      this.indicatorText.textContent = "당겨서 새로고침";
+    }
+  },
+
+  reset({ immediate = false } = {}) {
+    this.tracking = false;
+    this.synthetic = false;
+    this.startedAtTop = false;
+    this.refreshing = false;
+    this.rawY = 0;
+
+    if (this.resultTimer !== null) {
+      window.clearTimeout(this.resultTimer);
+      this.resultTimer = null;
+    }
+
+    if (this.stage) {
+      this.stage.classList.remove("is-dragging", "is-refreshing");
+
+      if (immediate) {
+        const oldTransition = this.stage.style.transition;
+        this.stage.style.transition = "none";
+        this.stage.style.transform = "translate3d(0, 0, 0)";
+        // 강제 reflow 후 원래 transition을 복구합니다.
+        void this.stage.offsetHeight;
+        this.stage.style.transition = oldTransition;
+      } else {
+        this.setStageOffset(0, false);
+      }
+    }
+
+    this.hideIndicator();
+  }
+};
+
 // =========================
 // PWA SERVICE WORKER
 // =========================
@@ -1129,7 +1511,7 @@ const PWA = {
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
-          "./service-worker.js?v=4.4",
+          "./service-worker.js?v=4.5",
           {
             scope: "./",
             updateViaCache: "none"
@@ -1164,6 +1546,8 @@ const App = {
       return;
     }
 
+    ElasticScroll.init();
+
     State.token = Auth.getToken();
 
     if (DebugBackend.isDebugToken(State.token)) {
@@ -1190,6 +1574,10 @@ const App = {
   async load({ showLoading = false, silent = false } = {}) {
     if (State.loading || !State.token) return false;
 
+    // 요청 도중 로그아웃/토큰 변경이 일어나면 늦게 도착한 응답이
+    // 새 화면을 덮어쓰지 못하도록 요청 시작 시점의 토큰을 고정합니다.
+    const requestToken = State.token;
+
     State.loading = true;
 
     if (showLoading) {
@@ -1197,7 +1585,12 @@ const App = {
     }
 
     try {
-      const raw = await API.fetchAssignments(State.token);
+      const raw = await API.fetchAssignments(requestToken);
+
+      if (State.token !== requestToken) {
+        return false;
+      }
+
       UI.updateDebugIndicator();
 
       if (raw?.errorcode || raw?.exception) {
@@ -1221,6 +1614,10 @@ const App = {
 
       return true;
     } catch (error) {
+      if (State.token !== requestToken) {
+        return false;
+      }
+
       console.error("[App.load]", error);
       UI.updateDebugIndicator();
 
@@ -1243,6 +1640,56 @@ const App = {
       return false;
     } finally {
       State.loading = false;
+    }
+  },
+
+  async manualRefresh() {
+    if (!State.token) return false;
+
+    // 같은 pull-to-refresh가 연속으로 들어와도 실제 API 호출은 한 번만 실행합니다.
+    if (State.manualRefreshPromise) {
+      return await State.manualRefreshPromise;
+    }
+
+    State.manualRefreshPromise = (async () => {
+      /*
+        자동 polling이 이미 통신 중이면 겹치는 요청을 만들지 않고
+        현재 요청이 끝난 직후 수동 요청을 한 번 더 실행합니다.
+        FETCH_TIMEOUT_MS보다 약간 긴 상한을 두어 영구 대기를 방지합니다.
+      */
+      const waitStartedAt = Date.now();
+      const waitLimit = FETCH_TIMEOUT_MS + 2_000;
+
+      while (State.loading && State.token) {
+        if (Date.now() - waitStartedAt > waitLimit) {
+          console.warn("[App.manualRefresh] 기존 요청 종료 대기 시간 초과");
+          return false;
+        }
+
+        await new Promise(resolve => window.setTimeout(resolve, 90));
+      }
+
+      if (!State.token) return false;
+
+      // 다음 자동 polling과 수동 새로고침이 바로 연달아 붙지 않게 재예약합니다.
+      if (State.refreshTimer !== null) {
+        window.clearTimeout(State.refreshTimer);
+        State.refreshTimer = null;
+      }
+
+      const ok = await this.load({ showLoading: false, silent: true });
+
+      if (State.token) {
+        this.scheduleNetworkRefresh(getNetworkRefreshIntervalMs());
+      }
+
+      return ok;
+    })();
+
+    try {
+      return await State.manualRefreshPromise;
+    } finally {
+      State.manualRefreshPromise = null;
     }
   },
 
