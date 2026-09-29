@@ -1,193 +1,398 @@
-# 📚 Assignment Hub (PWA)
-Moodle 기반 전주대학교의 과제 정보를 모바일 환경에서 빠르게 확인할 수 있는 PWA 웹앱입니다.
-별도의 서버 없이 **클라이언트(JavaScript)만으로 동작**하며
+<div align="center">
 
-```diff
-- **향후 본 프로젝트의 무단 재배포를 금지합니다.**
-```
----
+<img src="./icons/icon-512.png" width="128" height="128" alt="JJFK icon">
 
-## 🚀 주요 기능
+# JJFK
 
-* 🔐 Moodle 토큰 기반 로그인
-* 📋 전체 과제 자동 조회 (API)
-* ⏳ 마감 임박 / 종료 상태 자동 계산
-* 🎯 16일 이내 과제만 필터링
-* 📱 모바일 최적화 UI
-* 📦 PWA 지원 (홈 화면 추가, 앱처럼 실행)
-* 🔄 앱 실행 시 최신 과제 자동 반영
+### 전주대 과제확인
 
----
+전주대학교 Cyber Campus의 과제를 한 화면에서 확인하기 위한  
+**Liquid Glass 스타일의 설치형 PWA**입니다.
 
-## 🧱 프로젝트 구조
+<br>
 
-```
-.
-├── index.html          # 메인 UI
-├── style.css           # 스타일
-├── app.js              # 핵심 로직
-├── manifest.json       # PWA 설정
-├── service-worker.js   # 캐싱 및 오프라인 처리
-└── icons/              # 앱 아이콘
-```
+![PWA](https://img.shields.io/badge/PWA-Standalone-5A67D8?style=flat-square)
+![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E?style=flat-square&logo=javascript&logoColor=111)
+![Moodle](https://img.shields.io/badge/Moodle-Web%20Service-F98012?style=flat-square&logo=moodle&logoColor=fff)
+![Target](https://img.shields.io/badge/Target-iOS%20PWA-111111?style=flat-square&logo=apple&logoColor=fff)
+
+<br>
+
+**빠르게 보고, 정확하게 갱신하고, 앱처럼 사용하기.**
+
+</div>
 
 ---
 
-## ⚙️ 동작 방식
+## Overview
 
-### 1. 로그인
+JJFK는 Cyber Campus의 Moodle Web Service를 이용해 로그인 토큰을 발급받고,  
+사용자의 과제를 과목별로 정리하여 마감 순서와 남은 시간을 보여줍니다.
 
-* 사용자 ID / 비밀번호 입력
-* Moodle `token.php` API 호출
-* 토큰을 `localStorage`에 저장
+별도의 애플리케이션 서버를 두지 않고 브라우저에서 직접 동작하며,  
+홈 화면에 추가하면 `standalone` PWA로 실행됩니다.
 
-### 2. 데이터 로드
-
-* 저장된 토큰으로 과제 API 호출
-* `mod_assign_get_assignments` 사용
-
-### 3. 데이터 처리
-
-* 과목별 과제 정리
-* 마감일 기준 정렬
-* 필터 조건 적용:
-
-  * 16일 초과 과제 제외
-  * 일정 이상 지난 과제 제외
-
-### 4. 상태 계산
-
-* 남은 시간 기준 색상 표시
-
-  * 초록: 여유 있음
-  * 주황: 마감 임박
-  * 빨강: 마감 초과
-
-### 5. UI 렌더링
-
-* 과목별 카드 생성
-* 과제 리스트 출력
+> [!NOTE]
+> JJFK는 전주대학교 또는 Cyber Campus의 공식 애플리케이션이 아닌 개인 프로젝트입니다.
 
 ---
 
-## 🔗 사용 API
+## Highlights
 
-### 토큰 발급
+| | 기능 |
+|---|---|
+| **Assignment Feed** | 전체 과제를 과목별로 정리하고 가까운 마감부터 표시 |
+| **Live Countdown** | 서버 요청과 분리된 로컬 시계로 남은 시간을 지속적으로 갱신 |
+| **Server Sync** | 실행 중 Moodle API를 주기적으로 다시 조회하여 새 과제·마감 변경 반영 |
+| **Pull to Refresh** | 최상단에서 의도적으로 당겨 즉시 서버와 다시 동기화 |
+| **Elastic Edge** | 목록이 짧아도 iOS 앱처럼 끝단에 탄력감을 제공 |
+| **Liquid Glass UI** | 큰 surface 중심의 반투명 glass material과 iOS 스타일 인터랙션 |
+| **Standalone PWA** | 홈 화면 설치, 앱 아이콘, 오프라인 앱 셸 지원 |
+| **Built-in Debug Backend** | 별도 mock 파일 없이 로그인부터 polling까지 전체 흐름 테스트 |
 
+---
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Login] --> B[token.php]
+    B --> C[Moodle token]
+    C --> D[mod_assign_get_assignments]
+    D --> E[Normalize]
+    E --> F[Filter]
+    F --> G[Sort]
+    G --> H[Render]
+    H --> I[Local countdown]
+    H --> J[Periodic server sync]
+    J --> D
 ```
+
+실제 데이터 처리 흐름은 다음과 같습니다.
+
+```text
+로그인
+  ↓
+Moodle token 발급
+  ↓
+과제 API 요청
+  ↓
+응답 정규화
+  ↓
+표시 범위 필터
+  ↓
+마감순 정렬
+  ↓
+Liquid Glass UI 렌더링
+```
+
+---
+
+## Refresh model
+
+JJFK는 **시간 표시**와 **서버 동기화**를 분리합니다.
+
+### Local clock
+
+남은 시간은 서버 응답을 기다리지 않고 로컬 시계로 계산합니다.
+
+```text
+약 10초마다
+Date.now()
+  ↓
+현재 화면의 남은 시간만 갱신
+```
+
+네트워크가 느려지거나 일시적으로 실패해도 이미 받아 둔 과제의 카운트다운은 계속 움직입니다.
+
+### Moodle sync
+
+실제 로그인 환경에서는 약 **60초마다** Moodle API를 다시 조회합니다.
+
+```text
+60초
+ ↓
+새 과제 확인
+마감시간 변경 확인
+삭제/변경된 데이터 반영
+ ↓
+화면 reconcile
+```
+
+앱이 다시 foreground로 돌아온 경우에도 현재 상태를 보정하도록 구성되어 있습니다.
+
+### Pull to refresh
+
+최상단에서 의도적으로 당기면 자동 polling을 기다리지 않고 즉시 API를 다시 호출합니다.
+
+현재 제스처 기준:
+
+```text
+0 ───── 34px ───────────── 100px
+│        │                   │
+│        │                   └─ 100ms 유지
+│        └─ refresh 의도 감지 시작
+└─ 일반적인 elastic edge
+
+전체 pull 동작은 최소 320ms 이상이어야 refresh로 확정
+```
+
+빠르게 스크롤하다 우연히 상단에 닿은 동작이 바로 새로고침으로 이어지지 않도록 분리되어 있습니다.
+
+---
+
+## Assignment state
+
+과제는 현재 시각과 마감시간의 차이를 기준으로 상태가 계산됩니다.
+
+- **Green** — 마감까지 여유가 있는 상태
+- **Orange** — 마감이 가까운 상태
+- **Red** — 매우 임박했거나 이미 마감된 상태
+
+화면에는 현재 기준 **16일 이내의 과제**와 **마감 후 1일 이내의 과제**를 중심으로 표시합니다.
+
+---
+
+## Liquid Glass UI
+
+JJFK의 glass는 모든 요소에 blur를 반복해서 거는 방식이 아닙니다.
+
+```text
+Course
+└─ Liquid Glass Surface
+   ├─ Assignment Row
+   ├─ Assignment Row
+   └─ Assignment Row
+```
+
+과목 단위의 큰 surface에만 glass material을 적용하고,  
+내부 과제는 하나의 리스트처럼 구성하여 시각적 계층과 렌더링 비용을 함께 관리합니다.
+
+주요 표현 요소:
+
+- translucent surface
+- backdrop blur
+- restrained saturation
+- specular highlight
+- subtle rim
+- touch feedback
+- muted ambient background
+- iOS safe-area 대응
+
+---
+
+## Built-in Debug Backend
+
+별도의 `test-data.js` 없이 **실제 앱의 로그인 → token → API → normalize → filter → render → polling 흐름 전체**를 테스트할 수 있습니다.
+
+디버그 모드에서는 **ID 칸에 예약어를 입력하고 비밀번호를 비워 둡니다.**
+
+| ID | 동작 |
+|---|---|
+| `normal` | 일반적인 테스트 과제 |
+| `massive` | 대량 과제로 렌더링·스크롤 스트레스 테스트 |
+| `deadline` | 마감 경계값 집중 테스트 |
+| `changes` | polling마다 추가·삭제·제목·마감시간 변화 |
+| `slow` | 느린 서버 응답 에뮬레이션 |
+| `flaky` | 주기적인 네트워크 실패와 복구 |
+| `empty` | 과제가 없는 상태 |
+| `malformed` | 일부 손상된 Moodle 응답 |
+| `apierror` | Moodle API 오류 응답 |
+| `loginfail` | 로그인 오류 UI |
+| `help` | 디버그 예약어 안내 |
+| `debug` | `normal`의 별칭 |
+
+```text
+ID: normal
+PW: [비워 둠]
+```
+
+디버그 예약어는 Moodle 서버로 전송하지 않고 내부 backend에서 처리합니다.
+
+---
+
+## Installation
+
+### iPhone / iPad
+
+1. Safari에서 JJFK 페이지를 엽니다.
+2. **공유** 버튼을 누릅니다.
+3. **홈 화면에 추가**를 선택합니다.
+4. 홈 화면의 JJFK 아이콘으로 실행합니다.
+
+Standalone 모드에서는 일반 Safari 탭이 아니라 앱 형태로 실행됩니다.
+
+> [!TIP]
+> PWA 아이콘을 교체한 뒤 기존 홈 화면 아이콘이 그대로 남는 경우, 기존 PWA를 삭제한 뒤 다시 홈 화면에 추가하는 것이 가장 확실합니다.
+
+---
+
+## Project structure
+
+```text
+jjfk/
+├─ index.html
+├─ style.css
+├─ app.js
+├─ manifest.json
+├─ service-worker.js
+├─ README.md
+└─ icons/
+   ├─ icon-192.png
+   ├─ icon-512.png
+   └─ icon-maskable-512.png
+```
+
+### `index.html`
+
+- 앱 shell
+- 로그인 화면
+- dashboard 구조
+- safe-area / PWA metadata
+- refresh indicator layer
+
+### `style.css`
+
+- Liquid Glass material
+- color tokens
+- responsive layout
+- elastic refresh UI
+- login / dashboard / toast 스타일
+
+### `app.js`
+
+- 인증
+- Moodle API
+- 데이터 정규화·필터·정렬
+- 실시간 남은 시간 계산
+- 서버 polling
+- pull-to-refresh
+- elastic edge
+- debug backend
+
+### `service-worker.js`
+
+- 앱 shell 캐시
+- HTML / JS / CSS `network-first`
+- manifest / icon `cache-first`
+- cross-origin Moodle 요청은 가로채지 않음
+
+---
+
+## API
+
+JJFK는 Cyber Campus의 Moodle Web Service를 사용합니다.
+
+### Token
+
+```text
 https://cyber.jj.ac.kr/login/token.php
 ```
 
-### 과제 조회
+서비스 이름:
 
+```text
+moodle_mobile_app
 ```
+
+### Assignments
+
+```text
 https://cyber.jj.ac.kr/webservice/rest/server.php
 ```
 
-### 사용 함수
+Web Service function:
 
-```
+```text
 mod_assign_get_assignments
 ```
 
 ---
 
+## Privacy & security
 
-## 📱 PWA 사용 방법
+JJFK에는 별도의 계정 데이터 서버가 없습니다.
 
-1. 사이트 접속
-2. 브라우저 메뉴 → "홈 화면에 추가"
-3. 앱처럼 실행 가능
+- 입력한 학번과 비밀번호는 Moodle 토큰 발급 요청에 사용됩니다.
+- **비밀번호 자체는 localStorage에 저장하지 않습니다.**
+- 발급받은 Moodle token은 로그인 유지 용도로 브라우저 `localStorage`에 저장합니다.
+- 로그아웃하면 저장된 token을 삭제합니다.
+- Service Worker는 `cyber.jj.ac.kr`로 향하는 cross-origin 로그인/API 요청을 캐시하거나 가로채지 않습니다.
+- 공용 기기에서는 사용 후 로그아웃을 권장합니다.
 
----
-
-## 🔒 데이터 저장
-
-* 토큰: `localStorage`
-* 서버 저장 없음
-* 모든 데이터는 클라이언트에서 처리
-
----
-
-## ⚠️ 주의사항
-
-* 계정 정보는 브라우저 내에서만 사용됨
-* 공용 PC 사용 시 토큰 삭제 필요
-* Moodle API 변경 시 동작 오류 발생 가능
+> [!WARNING]
+> Moodle token은 계정 접근에 사용되는 인증 정보입니다. 브라우저 개발자 도구, 저장소 백업 또는 제3자 스크립트에 노출되지 않도록 주의해야 합니다.
 
 ---
 
-## 🧠 설계 특징
+## Cache strategy
 
-* 서버 없이 동작하는 완전 프론트엔드 구조
-* PWA 기반 모바일 앱 대체
-* API 기반 실시간 데이터 반영
-* 빠른 로딩과 단순한 UI 구조
+```text
+index.html
+app.js
+style.css
+    │
+    └── Network First
+        └── 네트워크 실패 시 마지막 정상 캐시 사용
+
+manifest.json
+icons/*
+    │
+    └── Cache First
+```
+
+Moodle API 요청은 Service Worker의 캐시 대상에서 제외됩니다.
 
 ---
 
+## Design principles
 
-## 📄 License
+JJFK는 다음 기준을 유지합니다.
 
-MIT License
+- 중요한 정보는 glass보다 선명하게
+- 모든 요소를 둥근 카드로 만들지 않기
+- backdrop blur는 큰 surface에 한정
+- 시간 계산과 네트워크 동기화를 분리
+- 서버 실패가 화면 전체 정지로 이어지지 않게 하기
+- iOS의 native scrolling behavior를 가능한 한 유지
+- 테스트 코드는 실제 데이터 처리 경로를 우회하지 않기
 
+---
 
-## v4.4 debug keyword login
+## Development
 
-디버그 모드는 비밀번호가 아니라 학번(ID) 칸의 예약어로 선택합니다.
+정적 파일 기반 프로젝트이므로 별도의 빌드 과정이 필요하지 않습니다.
 
-- `normal` / PW 빈칸: 기본 데이터
-- `massive` / PW 빈칸: 대량 과제
-- `deadline` / PW 빈칸: 마감 경계값
-- `changes` / PW 빈칸: polling마다 추가/삭제/마감 변경
-- `slow` / PW 빈칸: 느린 서버
-- `flaky` / PW 빈칸: 주기적 네트워크 실패
-- `empty` / PW 빈칸: 빈 목록
-- `malformed` / PW 빈칸: 일부 손상 데이터
-- `apierror` / PW 빈칸: Moodle API 오류
-- `loginfail` / PW 빈칸: 로그인 오류 UI 테스트
-- `help` / PW 빈칸: 예약어 목록 표시
-- `debug`는 `normal`의 별칭입니다.
+```text
+HTML + CSS + Vanilla JavaScript
+```
 
-안전을 위해 예약어가 ID에 들어오면 비밀번호 자동완성 여부와 관계없이 Moodle 서버로 절대 전송하지 않습니다. 실제 Moodle 로그인은 숫자 학번 + 비밀번호 방식 그대로입니다.
+HTTPS 환경에서 배포하면 PWA와 Service Worker 기능을 사용할 수 있습니다.
 
+배포 후 코드가 변경되면 asset version과 Service Worker cache version을 함께 갱신하는 것을 권장합니다.
 
-## v4.5 - Elastic Edge / Pull to Refresh
+---
 
-- 긴 과제 목록: iOS의 네이티브 관성 스크롤과 끝단 탄성을 그대로 유지합니다.
-- 짧은 과제 목록: 스크롤 높이가 화면보다 짧아도 위/아래 방향으로 탄성 이동합니다.
-- 최상단에서 아래로 약 92 CSS px 이상 당긴 뒤 놓으면 Moodle assignments API를 즉시 다시 조회합니다.
-- 자동 서버 동기화 주기와 별개로 수동 새로고침이 동작합니다.
-- 자동 동기화가 이미 진행 중이면 요청을 겹치지 않고 종료 직후 수동 동기화를 1회 실행합니다.
-- 새로고침 도중에는 indicator가 유지되고 성공/실패 결과를 짧게 표시합니다.
-- 네트워크 갱신 후에는 자동 polling 타이머를 다시 예약합니다.
-- 요청 중 로그아웃/토큰 변경이 발생하면 늦게 도착한 응답은 화면에 적용하지 않습니다.
+## Disclaimer
 
-디버그 백엔드는 기존과 동일합니다.
+JJFK는 Cyber Campus를 더 편하게 확인하기 위한 개인 프로젝트입니다.
 
-- ID `normal`, PW 빈칸: 일반 데이터
-- ID `massive`: 대량 데이터
-- ID `changes`: 서버 데이터 변경
-- ID `slow`: 느린 서버
-- ID `flaky`: 간헐적 실패
-- ID `empty`: 빈 목록
+학교 또는 Moodle 서버의 API 정책, 응답 형식, 인증 방식이 변경되면 일부 기능이 동작하지 않을 수 있습니다.
 
+---
 
-## v4.6 deliberate refresh
+## License / redistribution
 
-- iOS 상태바 `theme-color`를 `#17181d`로 올려 상단이 지나치게 검게 보이던 문제를 완화했습니다.
-- pull-to-refresh 결과 indicator를 top bar보다 높은 stacking layer로 올렸습니다.
-- 새로고침은 34px dead-zone → 154px pull → 140ms 유지 → release의 2단계 의도 제스처로만 실행됩니다.
-- 전체 pull 동작도 최소 320ms 이상이어야 하므로 우연한 빠른 overscroll은 새로고침으로 이어지지 않습니다.
-- 업데이트 완료/실패 표시 시간을 700ms로 늘렸습니다.
+현재 저장소에는 별도의 `LICENSE` 파일이 포함되어 있지 않습니다.
 
+**명시적인 허가 없이 본 프로젝트의 전체 또는 일부를 재배포하는 것을 허용하지 않습니다.**
 
-## v4.6.1 refresh tuning
+---
 
-- pull-to-refresh release threshold: 154px → 100px
-- ready hold: 140ms → 100ms
-- 전체 최소 pull duration 320ms는 유지하여 우연한 overscroll 오작동 방지
-- refresh/result 표시를 scroll container 밖 dashboard 레이어로 이동
-- top bar 실측 하단 + 12px에 indicator 고정
-- indicator z-index를 top bar보다 확실히 높게 조정
-- refresh/result 동안 scroll-stage를 62px 내려 pill과 첫 과제 사이 여백 확보
+<div align="center">
+
+**JJFK**
+
+Made by `daxun` · [EnzoLisianthus](https://github.com/EnzoLisianthus)
+
+</div>
