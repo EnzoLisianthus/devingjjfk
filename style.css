@@ -1,5 +1,5 @@
 /* =========================================================
-   JJFK Liquid Glass UI v4.6-deliberate-refresh
+   JJFK Liquid Glass UI v4.6.1-deliberate-refresh
    - iOS standalone PWA 우선
    - 상단 시스템 영역은 웹 blur로 덮지 않음
    - backdrop-filter는 로그인 패널/과목 surface처럼 큰 계층에만 적용
@@ -609,14 +609,14 @@ button {
 */
 .pull-refresh-indicator {
   position: absolute;
-  z-index: 70;
-  top: 7px;
+  z-index: 240;
+  top: 0; /* 실제 값은 JS가 top-bar의 실측 하단 + 12px로 설정 */
   left: 50%;
 
   pointer-events: none;
 
   opacity: 0;
-  transform: translate3d(-50%, -12px, 0) scale(0.94);
+  transform: translate3d(-50%, -8px, 0) scale(0.94);
 
   transition:
     opacity 0.16s ease,
@@ -628,16 +628,20 @@ button {
 }
 
 .pull-refresh-indicator.is-result {
-  z-index: 90;
+  z-index: 280;
+}
+
+.pull-refresh-indicator.is-result {
+  transform: translate3d(-50%, 0, 0) scale(1);
 }
 
 .pull-refresh-indicator.is-ready {
-  transform: translate3d(-50%, 2px, 0) scale(1);
+  transform: translate3d(-50%, 0, 0) scale(1);
 }
 
 .pull-refresh-indicator.is-refreshing {
   opacity: 1;
-  transform: translate3d(-50%, 4px, 0) scale(1);
+  transform: translate3d(-50%, 0, 0) scale(1);
 }
 
 .pull-refresh-pill {

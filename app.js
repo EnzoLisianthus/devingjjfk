@@ -6,7 +6,7 @@
 // - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4.6-deliberate-refresh";
+const APP_VERSION = "4.6.1-deliberate-refresh";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 
@@ -1144,6 +1144,8 @@ const ElasticScroll = {
   stage: null,
   indicator: null,
   indicatorText: null,
+  dashboard: null,
+  topBar: null,
 
   initialized: false,
   tracking: false,
@@ -1161,12 +1163,12 @@ const ElasticScroll = {
   // 1) intentThreshold 전까지는 단순한 끝단 탄성으로 취급
   // 2) releaseThreshold까지 더 당긴 뒤 잠깐 유지해야 refresh 준비 완료
   intentThreshold: 34,
-  releaseThreshold: 154,
+  releaseThreshold: 100,
   minPullDurationMs: 320,
-  readyHoldMs: 140,
+  readyHoldMs: 100,
 
   maxVisualOffset: 102,
-  holdOffset: 52,
+  holdOffset: 62,
 
   gestureStartedAt: 0,
   readySince: 0,
@@ -1180,8 +1182,10 @@ const ElasticScroll = {
     this.stage = UI.scrollStage;
     this.indicator = UI.pullRefreshIndicator;
     this.indicatorText = UI.pullRefreshText;
+    this.dashboard = UI.dashboardLayer;
+    this.topBar = this.dashboard?.querySelector(".top-bar") || null;
 
-    if (!this.container || !this.stage || !this.indicator || !this.indicatorText) {
+    if (!this.container || !this.stage || !this.indicator || !this.indicatorText || !this.dashboard || !this.topBar) {
       console.warn("[ElasticScroll] 필요한 DOM을 찾지 못했습니다.");
       return;
     }
@@ -1210,7 +1214,27 @@ const ElasticScroll = {
       { passive: true }
     );
 
+    window.addEventListener("resize", () => this.updateIndicatorAnchor(), { passive: true });
+    window.visualViewport?.addEventListener(
+      "resize",
+      () => this.updateIndicatorAnchor(),
+      { passive: true }
+    );
+
+    this.updateIndicatorAnchor();
     this.initialized = true;
+  },
+
+  updateIndicatorAnchor() {
+    if (!this.indicator || !this.dashboard || !this.topBar) return;
+
+    const dashboardRect = this.dashboard.getBoundingClientRect();
+    const topBarRect = this.topBar.getBoundingClientRect();
+
+    // top bar 아래에 12px의 독립된 breathing room을 두고 표시합니다.
+    // indicator를 scroll container 밖에 두어 iOS compositing에서도 top bar보다 위에 유지합니다.
+    const top = Math.max(0, topBarRect.bottom - dashboardRect.top + 12);
+    this.indicator.style.top = `${top.toFixed(2)}px`;
   },
 
   isDashboardActive() {
@@ -1343,8 +1367,6 @@ const ElasticScroll = {
       this.startedAtTop &&
       this.isDashboardActive();
 
-    const wasSynthetic = this.synthetic;
-
     if (this.readyTimer !== null) {
       window.clearTimeout(this.readyTimer);
       this.readyTimer = null;
@@ -1355,7 +1377,7 @@ const ElasticScroll = {
     this.startedAtTop = false;
 
     if (shouldRefresh) {
-      void this.performRefresh({ holdStage: wasSynthetic });
+      void this.performRefresh({ holdStage: true });
       return;
     }
 
@@ -1393,6 +1415,8 @@ const ElasticScroll = {
 
   updatePullIndicator(rawDistance) {
     if (!this.indicator || !this.indicatorText) return;
+
+    this.updateIndicatorAnchor();
 
     const distance = Math.max(0, Number(rawDistance) || 0);
 
@@ -1467,6 +1491,7 @@ const ElasticScroll = {
 
     this.refreshing = true;
     this.rawY = 0;
+    this.updateIndicatorAnchor();
 
     if (this.resultTimer !== null) {
       window.clearTimeout(this.resultTimer);
@@ -1608,7 +1633,7 @@ const PWA = {
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
-          "./service-worker.js?v=4.6",
+          "./service-worker.js?v=4.6.1",
           {
             scope: "./",
             updateViaCache: "none"

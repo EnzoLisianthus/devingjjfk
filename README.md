@@ -180,3 +180,14 @@ MIT License
 - 새로고침은 34px dead-zone → 154px pull → 140ms 유지 → release의 2단계 의도 제스처로만 실행됩니다.
 - 전체 pull 동작도 최소 320ms 이상이어야 하므로 우연한 빠른 overscroll은 새로고침으로 이어지지 않습니다.
 - 업데이트 완료/실패 표시 시간을 700ms로 늘렸습니다.
+
+
+## v4.6.1 refresh tuning
+
+- pull-to-refresh release threshold: 154px → 100px
+- ready hold: 140ms → 100ms
+- 전체 최소 pull duration 320ms는 유지하여 우연한 overscroll 오작동 방지
+- refresh/result 표시를 scroll container 밖 dashboard 레이어로 이동
+- top bar 실측 하단 + 12px에 indicator 고정
+- indicator z-index를 top bar보다 확실히 높게 조정
+- refresh/result 동안 scroll-stage를 62px 내려 pill과 첫 과제 사이 여백 확보
