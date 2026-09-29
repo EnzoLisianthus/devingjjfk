@@ -1,5 +1,5 @@
 /* =========================================================
-   JJFK Liquid Glass UI v4.5-elastic-refresh
+   JJFK Liquid Glass UI v4.6-deliberate-refresh
    - iOS standalone PWA 우선
    - 상단 시스템 영역은 웹 blur로 덮지 않음
    - backdrop-filter는 로그인 패널/과목 surface처럼 큰 계층에만 적용
@@ -13,6 +13,7 @@
 
   --bg: #0b0c10;
   --bg-deep: #07080b;
+  --status-surface: #17181d;
 
   --text: rgba(255, 255, 255, 0.94);
   --text-soft: rgba(248, 248, 250, 0.76);
@@ -67,7 +68,7 @@ body {
   height: 100%;
   min-height: 100%;
 
-  background: var(--bg);
+  background: var(--status-surface);
   color: var(--text);
 
   font-family:
@@ -459,6 +460,9 @@ button {
    8. DASHBOARD / SYSTEM TOP EDGE
 ========================= */
 #dashboard-layer {
+  position: relative;
+  isolation: isolate;
+
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -488,8 +492,8 @@ button {
   background:
     linear-gradient(
       180deg,
-      rgba(11, 12, 17, 0.16) 0%,
-      rgba(11, 12, 17, 0.04) 72%,
+      rgba(23, 24, 29, 0.30) 0%,
+      rgba(16, 17, 22, 0.08) 72%,
       transparent 100%
     );
 }
@@ -605,7 +609,7 @@ button {
 */
 .pull-refresh-indicator {
   position: absolute;
-  z-index: 12;
+  z-index: 70;
   top: 7px;
   left: 50%;
 
@@ -621,6 +625,10 @@ button {
 
 .pull-refresh-indicator.is-visible {
   opacity: 1;
+}
+
+.pull-refresh-indicator.is-result {
+  z-index: 90;
 }
 
 .pull-refresh-indicator.is-ready {

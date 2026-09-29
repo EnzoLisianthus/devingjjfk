@@ -171,3 +171,12 @@ MIT License
 - ID `slow`: 느린 서버
 - ID `flaky`: 간헐적 실패
 - ID `empty`: 빈 목록
+
+
+## v4.6 deliberate refresh
+
+- iOS 상태바 `theme-color`를 `#17181d`로 올려 상단이 지나치게 검게 보이던 문제를 완화했습니다.
+- pull-to-refresh 결과 indicator를 top bar보다 높은 stacking layer로 올렸습니다.
+- 새로고침은 34px dead-zone → 154px pull → 140ms 유지 → release의 2단계 의도 제스처로만 실행됩니다.
+- 전체 pull 동작도 최소 320ms 이상이어야 하므로 우연한 빠른 overscroll은 새로고침으로 이어지지 않습니다.
+- 업데이트 완료/실패 표시 시간을 700ms로 늘렸습니다.

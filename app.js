@@ -6,7 +6,7 @@
 // - 중복 네트워크 요청 방지
 // =========================================================
 
-const APP_VERSION = "4.5-elastic-refresh";
+const APP_VERSION = "4.6-deliberate-refresh";
 const BASE_URL = "https://cyber.jj.ac.kr/webservice/rest/server.php";
 const TOKEN_URL = "https://cyber.jj.ac.kr/login/token.php";
 
@@ -1157,10 +1157,20 @@ const ElasticScroll = {
   lastY: 0,
   rawY: 0,
 
-  releaseThreshold: 92,
-  maxVisualOffset: 96,
-  holdOffset: 48,
+  // 새로고침은 의도적인 2단계 pull만 허용합니다.
+  // 1) intentThreshold 전까지는 단순한 끝단 탄성으로 취급
+  // 2) releaseThreshold까지 더 당긴 뒤 잠깐 유지해야 refresh 준비 완료
+  intentThreshold: 34,
+  releaseThreshold: 154,
+  minPullDurationMs: 320,
+  readyHoldMs: 140,
 
+  maxVisualOffset: 102,
+  holdOffset: 52,
+
+  gestureStartedAt: 0,
+  readySince: 0,
+  readyTimer: null,
   resultTimer: null,
 
   init() {
@@ -1253,6 +1263,13 @@ const ElasticScroll = {
     this.lastX = touch.clientX;
     this.lastY = touch.clientY;
     this.rawY = 0;
+    this.gestureStartedAt = performance.now();
+    this.readySince = 0;
+
+    if (this.readyTimer !== null) {
+      window.clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
 
     this.stage?.classList.remove("is-refreshing");
   },
@@ -1274,6 +1291,10 @@ const ElasticScroll = {
     }
 
     this.rawY = dy;
+
+    if (dy < this.releaseThreshold) {
+      this.clearReadyState();
+    }
 
     if (this.synthetic) {
       /*
@@ -1311,12 +1332,23 @@ const ElasticScroll = {
   onTouchEnd() {
     if (!this.tracking) return;
 
+    const now = performance.now();
+    const pullDuration = now - this.gestureStartedAt;
+    const readyDuration = this.readySince > 0 ? now - this.readySince : 0;
+
     const shouldRefresh =
       this.rawY >= this.releaseThreshold &&
+      pullDuration >= this.minPullDurationMs &&
+      readyDuration >= this.readyHoldMs &&
       this.startedAtTop &&
       this.isDashboardActive();
 
     const wasSynthetic = this.synthetic;
+
+    if (this.readyTimer !== null) {
+      window.clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
 
     this.tracking = false;
     this.synthetic = false;
@@ -1335,7 +1367,21 @@ const ElasticScroll = {
     this.synthetic = false;
     this.startedAtTop = false;
     this.rawY = 0;
+    this.clearReadyState();
     this.snapBack();
+  },
+
+  clearReadyState() {
+    this.readySince = 0;
+
+    if (this.readyTimer !== null) {
+      window.clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
+
+    if (this.indicator) {
+      this.indicator.classList.remove("is-ready");
+    }
   },
 
   setStageOffset(offset, dragging = false) {
@@ -1348,13 +1394,23 @@ const ElasticScroll = {
   updatePullIndicator(rawDistance) {
     if (!this.indicator || !this.indicatorText) return;
 
+    const distance = Math.max(0, Number(rawDistance) || 0);
+
+    // 첫 34px는 순수한 끝단 탄성 구간입니다.
+    // 이 구간에서는 pull-to-refresh UI 자체를 띄우지 않아
+    // 평범한 스크롤 끝단 움직임이 새로고침으로 느껴지지 않게 합니다.
+    if (distance < this.intentThreshold) {
+      this.hideIndicator();
+      return;
+    }
+
+    const activeRange = Math.max(1, this.releaseThreshold - this.intentThreshold);
     const progress = Math.min(
       1,
-      Math.max(0, rawDistance / this.releaseThreshold)
+      Math.max(0, (distance - this.intentThreshold) / activeRange)
     );
 
     this.indicator.classList.add("is-visible");
-    this.indicator.classList.toggle("is-ready", progress >= 1);
     this.indicator.classList.remove(
       "is-refreshing",
       "is-result",
@@ -1362,11 +1418,45 @@ const ElasticScroll = {
     );
 
     this.indicator.setAttribute("aria-hidden", "false");
-    this.indicatorText.textContent =
-      progress >= 1 ? "놓으면 새로고침" : "당겨서 새로고침";
 
-    // 초반에는 은은하게 나타나고 임계점에 가까워질수록 완전히 보입니다.
-    this.indicator.style.opacity = String(0.18 + progress * 0.82);
+    if (distance >= this.releaseThreshold) {
+      if (this.readySince <= 0) {
+        this.readySince = performance.now();
+
+        if (this.readyTimer !== null) {
+          window.clearTimeout(this.readyTimer);
+        }
+
+        this.readyTimer = window.setTimeout(() => {
+          this.readyTimer = null;
+
+          if (
+            this.tracking &&
+            !this.refreshing &&
+            this.rawY >= this.releaseThreshold
+          ) {
+            this.indicator?.classList.add("is-ready");
+            if (this.indicatorText) {
+              this.indicatorText.textContent = "놓으면 새로고침";
+            }
+          }
+        }, this.readyHoldMs);
+      }
+
+      const readyLongEnough =
+        performance.now() - this.readySince >= this.readyHoldMs;
+
+      this.indicator.classList.toggle("is-ready", readyLongEnough);
+      this.indicatorText.textContent = readyLongEnough
+        ? "놓으면 새로고침"
+        : "조금만 더 유지";
+    } else {
+      this.clearReadyState();
+      this.indicatorText.textContent = "계속 당겨 새로고침";
+    }
+
+    // intentThreshold를 넘은 뒤에만 서서히 나타납니다.
+    this.indicator.style.opacity = String(0.16 + progress * 0.84);
   },
 
   async performRefresh({ holdStage = false } = {}) {
@@ -1430,7 +1520,7 @@ const ElasticScroll = {
       window.setTimeout(() => {
         if (!this.refreshing) this.hideIndicator();
       }, 260);
-    }, 420);
+    }, 700);
   },
 
   snapBack() {
@@ -1475,6 +1565,13 @@ const ElasticScroll = {
     this.startedAtTop = false;
     this.refreshing = false;
     this.rawY = 0;
+    this.gestureStartedAt = 0;
+    this.readySince = 0;
+
+    if (this.readyTimer !== null) {
+      window.clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
 
     if (this.resultTimer !== null) {
       window.clearTimeout(this.resultTimer);
@@ -1511,7 +1608,7 @@ const PWA = {
     window.addEventListener("load", async () => {
       try {
         const registration = await navigator.serviceWorker.register(
-          "./service-worker.js?v=4.5",
+          "./service-worker.js?v=4.6",
           {
             scope: "./",
             updateViaCache: "none"
