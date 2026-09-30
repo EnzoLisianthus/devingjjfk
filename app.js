@@ -595,6 +595,15 @@ function getNetworkRefreshIntervalMs() {
 // ENV / HELPERS
 // =========================
 function isStandalone() {
+  const params = new URLSearchParams(window.location.search);
+
+  // 구버전 PWA에서 새 버전 설치를 위해 Safari로 넘어온 경우
+  // iOS WebKit이 display-mode: standalone을 잘못 유지할 수 있으므로
+  // 설치 안내 화면을 강제로 표시한다.
+  if (params.get("install") === "1") {
+    return false;
+  }
+
   return (
     window.navigator.standalone === true ||
     window.matchMedia("(display-mode: standalone)").matches
